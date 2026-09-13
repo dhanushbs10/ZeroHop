@@ -140,21 +140,14 @@ export class RoomController {
     });
     socket.on("room:left", () => this.resetSession());
     socket.on("peer:offer", (event) => {
-      console.log(
-        `[room-controller] Received peer:offer from ${event.fromPeerId}, type=${event.sessionDescription.type}`
-      );
       this.targetPeerId ??= event.fromPeerId;
       void this.getWebRTC().handleRemoteDescription(event.sessionDescription);
     });
     socket.on("peer:answer", (event) => {
-      console.log(
-        `[room-controller] Received peer:answer from ${event.fromPeerId}, type=${event.sessionDescription.type}`
-      );
       this.targetPeerId ??= event.fromPeerId;
       void this.getWebRTC().handleRemoteDescription(event.sessionDescription);
     });
     socket.on("peer:ice-candidate", (event) => {
-      console.log(`[room-controller] Received peer:ice-candidate from ${event.fromPeerId}`);
       this.targetPeerId ??= event.fromPeerId;
       void this.getWebRTC().handleIceCandidate(event.candidate);
     });
@@ -179,9 +172,6 @@ export class RoomController {
     if (!roomCode || !this.shareToken) {
       throw new Error("Room creation failed without a room code");
     }
-    console.log(
-      `[room-controller] Room created (${roomCode}), starting WebRTC as sender`
-    );
     return { roomCode, shareToken: this.shareToken };
   }
 
@@ -191,9 +181,6 @@ export class RoomController {
     } else {
       this.encryptionKey = null;
     }
-    console.log(
-      `[room-controller] joinRoom${shareToken ? ": derived room key and" : ""} joining room ${roomCode}`
-    );
     this.signaling.joinRoom({ roomCode, role: "receiver" });
     const response = await waitForEvent<RoomJoinedResponse>(
       this.signaling.socket,
@@ -300,7 +287,6 @@ export class RoomController {
       this.room?.peers.push(peer);
     }
     if (peer.peerId !== this.selfPeerId && !this.targetPeerId) {
-      console.log(`[room-controller] Peer ${peer.peerId} joined, calling negotiate()`);
       this.targetPeerId = peer.peerId;
       this.webrtc?.negotiate();
     }
@@ -352,7 +338,6 @@ export class RoomController {
 
   private readonly handleOffer = (description: SessionDescription): void => {
     if (!this.room || !this.targetPeerId) return;
-    console.log(`[room-controller] Sending peer:offer to ${this.targetPeerId}`);
     this.signaling.sendOffer({
       roomCode: this.room.roomCode,
       targetPeerId: this.targetPeerId,
@@ -362,7 +347,6 @@ export class RoomController {
 
   private readonly handleAnswer = (description: SessionDescription): void => {
     if (!this.room || !this.targetPeerId) return;
-    console.log(`[room-controller] Sending peer:answer to ${this.targetPeerId}`);
     this.signaling.sendAnswer({
       roomCode: this.room.roomCode,
       targetPeerId: this.targetPeerId,
@@ -372,7 +356,6 @@ export class RoomController {
 
   private readonly handleIceCandidate = (candidate: IceCandidate): void => {
     if (!this.room || !this.targetPeerId) return;
-    console.log(`[room-controller] Sending peer:ice-candidate to ${this.targetPeerId}`);
     this.signaling.sendIceCandidate({
       roomCode: this.room.roomCode,
       targetPeerId: this.targetPeerId,

@@ -40,16 +40,8 @@ function requireSignalingUrl(): string {
 
 export function initializeSignaling(): SignalingClient {
   const url = requireSignalingUrl();
-  console.log(`[signaling] Connecting socket.io to ${url}`);
   const socket: SignalingSocket = io(url, {
     autoConnect: true,
-  });
-
-  socket.on("connect", () => {
-    console.log("Socket.io connected!");
-  });
-  socket.on("disconnect", (reason: string) => {
-    console.log(`Socket.io disconnected! reason=${reason}`);
   });
 
   return {

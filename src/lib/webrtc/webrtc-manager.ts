@@ -130,32 +130,17 @@ export class WebRTCManager {
     });
 
     this.pc.onnegotiationneeded = () => {
-      console.log(`[webrtc] onnegotiationneeded, initiator=${this.initiator}`);
       if (this.initiator) {
         void this.makeOffer();
       }
     };
     this.pc.onicecandidate = (event) => {
-      console.log(
-        `[webrtc] Local ICE candidate generated: ${
-          event.candidate ? event.candidate.candidate : "(end of candidates)"
-        }`
-      );
       if (event.candidate) {
         this.options.onSignal?.onIceCandidate?.(event.candidate.toJSON());
       }
     };
-    this.pc.onicecandidateerror = (event) => {
-      console.error("[webrtc] ICE candidate error", {
-        address: event.address,
-        errorCode: event.errorCode,
-        errorText: event.errorText,
-        url: event.url,
-      });
-    };
     this.pc.oniceconnectionstatechange = () => {
       const state = this.pc.iceConnectionState;
-      console.log(`[webrtc] iceConnectionState: ${state}`);
       if (state === "disconnected" || state === "failed") {
         this.handleConnectionDrop();
       } else if (
@@ -163,15 +148,10 @@ export class WebRTCManager {
         this.reconnecting
       ) {
         this.reconnecting = false;
-        console.log("[webrtc] ICE connection restored");
         this.options.onReconnected?.();
       }
     };
-    this.pc.onicegatheringstatechange = () => {
-      console.log(`[webrtc] iceGatheringState: ${this.pc.iceGatheringState}`);
-    };
     this.pc.onconnectionstatechange = () => {
-      console.log(`[webrtc] connectionState: ${this.pc.connectionState}`);
       if (this.pc.connectionState === "failed") {
         this.options.onConnectionFailed?.("Peer connection failed");
       }
@@ -182,11 +162,6 @@ export class WebRTCManager {
   }
 
   negotiate(): void {
-    console.log(
-      `[webrtc] negotiate() called, initiator=${this.initiator}, controlChannel=${
-        this.controlChannel?.readyState ?? "none"
-      }`
-    );
     if (!this.initiator) return;
     if (!this.controlChannel) {
       this.createDataChannels();
@@ -197,9 +172,6 @@ export class WebRTCManager {
   private handleConnectionDrop(): void {
     if (this.pc.signalingState === "closed" || this.reconnecting) return;
     this.reconnecting = true;
-    console.log(
-      "[webrtc] ICE connection dropped, restarting ICE and renegotiating"
-    );
     this.options.onReconnecting?.();
     if (this.initiator) {
       this.pc.restartIce();
@@ -208,16 +180,12 @@ export class WebRTCManager {
   }
 
   async handleRemoteDescription(description: SessionDescription): Promise<void> {
+    const offerCollision =
+      description.type === "offer" &&
+      (this.makingOffer || this.pc.signalingState !== "stable");
+    this.ignoreOffer = !this.polite && offerCollision;
+    if (this.ignoreOffer) return;
     try {
-      const offerCollision =
-        description.type === "offer" &&
-        (this.makingOffer || this.pc.signalingState !== "stable");
-      this.ignoreOffer = !this.polite && offerCollision;
-      console.log(
-        `[webrtc] handleRemoteDescription: type=${description.type}, offerCollision=${offerCollision}, polite=${this.polite}, makingOffer=${this.makingOffer}, signalingState=${this.pc.signalingState}, ignoreOffer=${this.ignoreOffer}`
-      );
-      if (this.ignoreOffer) return;
-
       await this.pc.setRemoteDescription(description);
       if (description.type === "offer") {
         await this.pc.setLocalDescription();
@@ -226,19 +194,16 @@ export class WebRTCManager {
           this.options.onSignal?.onAnswer?.(local.toJSON());
         }
       }
-    } catch (error) {
-      console.error("Failed to handle remote description", error);
+    } catch {
+      return;
     }
   }
 
   async handleIceCandidate(candidate: IceCandidate): Promise<void> {
-    console.log(`[webrtc] Adding remote ICE candidate: ${candidate.candidate}`);
     try {
       await this.pc.addIceCandidate(candidate);
-    } catch (error) {
-      if (!this.ignoreOffer) {
-        console.error("Failed to add remote ICE candidate", error);
-      }
+    } catch {
+      return;
     }
   }
 
@@ -263,8 +228,7 @@ export class WebRTCManager {
     try {
       await scheduled;
       return true;
-    } catch (error) {
-      console.error("[webrtc] Failed to send control message", error);
+    } catch {
       return false;
     }
   }
@@ -334,19 +298,13 @@ export class WebRTCManager {
     if (this.pc.signalingState !== "stable" || this.makingOffer) return;
     try {
       this.makingOffer = true;
-      console.log(
-        `[webrtc] makeOffer: starting, signalingState=${this.pc.signalingState}`
-      );
       await this.pc.setLocalDescription();
       const local = this.pc.localDescription;
-      console.log(
-        `[webrtc] makeOffer: setLocalDescription done, type=${local?.type}`
-      );
       if (local) {
         this.options.onSignal?.onOffer?.(local.toJSON());
       }
-    } catch (error) {
-      console.error("Failed to create offer", error);
+    } catch {
+      return;
     } finally {
       this.makingOffer = false;
     }
@@ -376,11 +334,9 @@ export class WebRTCManager {
     channel.binaryType = "arraybuffer";
 
     channel.onopen = () => {
-      console.log(`[webrtc] ${channel.label} channel open`);
       this.options.onDataChannelOpen?.(channelLabel(channel.label));
     };
     channel.onclose = () => {
-      console.log(`[webrtc] ${channel.label} channel closed`);
       this.options.onDataChannelClosed?.(channelLabel(channel.label));
     };
     channel.onmessage = (event) => {
@@ -423,8 +379,8 @@ export class WebRTCManager {
           )
         );
       }
-    } catch (error) {
-      console.error("[webrtc] Failed to route message", error);
+    } catch {
+      return;
     }
   }
 }
