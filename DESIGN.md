@@ -87,21 +87,34 @@ scroll-triggered reveals.
 
 ## Page Grammar
 
-- **Landing** - editorial Awwwards-style surface: a mono data line, a stacked
-  display headline (`FILES` solid / `HOP` outlined), a one-line promise and
-  direct primary (Begin a transfer) + secondary (Join with a room code)
-  CTAs, then a signature Hop moment (SVG SMIL `animateMotion` dot, forward
-  then back, bidirectional, `motion-reduce` static), a looping outlined
-  Marquee of the three claims plus no-account and speed items, three editorial
-  claims rows (01-03) with a full-row `zinc-100` hover fill that flips type to
-  dark, and a `HOP A FILE` close with CTAs. The landing layer adds film grain
-  (`overlay`, 0.08, fixed, canvas-generated) and a custom dot + trailing ring
-  cursor (16% lerp, ring grows on interactive hover, `cursor: none` on the
-  viewport, both gated to `pointer: fine` and no reduced motion).
-- **Send / Receive** - `max-w-xl`, h1 + one-line descriptor, a status pill,
-  then the session surface: room code + share link panel, dropzone, and
-  progress. The receive page leads with a room-code join form when no link
-  was opened. Unchanged by the Landing treatment.
+- **Landing** - editorial Awwwards-style surface with no site header (hidden
+  by `HeaderSlot`; the wordmark and Send/Receive links move into the hero
+  top rail). A full-viewport centered hero holds a giant stacked headline
+  (`ZERO` solid / `HOP` outlined) flanked by a top rail (Zap badge + wordmark,
+  right corner nav), a promise + CTAs (Begin a transfer / Join with a room
+  code). Below: three editorial claims rows with a full-row `zinc-100`
+  hover fill that flips type to dark, and a `HOP A FILE` close with CTAs. The
+  landing layer adds film grain (`overlay`, 0.08, fixed, canvas-generated) and
+  a custom dot + trailing ring cursor (16% lerp, ring grows on interactive
+  hover, `cursor: none` on the viewport, both gated to `pointer: fine` and no
+  reduced motion).
+- **Send / Receive** - `max-w-5xl` two-column shell. A display title
+  (`text-5xl sm:text-6xl`, `tracking-[-0.03em]`) sits with the status pill in
+  the top-right corner, one descriptor line below. Content is a set of
+  sections opened by `border-t border-zinc-800` (send: Room, Share, Received;
+  receive: Join / Connect / Receive then Share). The room code renders as
+  display-size mono (`text-4xl sm:text-5xl`, `tracking-[0.15em]`).
+  ShareDashboard tabs are underline mono (active tab gets a 1px `bg-zinc-300`
+  underline, inactive `text-zinc-500`). Received messages live in a right
+  column that gains a `border-l` divider at `lg`. While no peer is present the
+  request surface shows a centered mono uppercase waiting state ("Waiting for
+  the receiver"); the tabs and inputs render only after the peer presses Start
+  sharing. The connected state keys off the control channel only, so the share
+  surface appears as soon as peers can exchange messages. Both pages carry the
+  BackgroundOne backdrop and film grain.
+- **Legal** - editorial documents on the landing world: `text-5xl` title,
+  a mono uppercase meta line (version/effective date), and hairline sections
+  separated by `border-t border-zinc-800`. Grain only, no BackgroundOne.
 
 ## Landing Deviations
 
@@ -111,7 +124,6 @@ feel. Rules loosened for this surface only:
 - Display type scales to `clamp(4rem,18vw,13rem)`, `leading-[0.85]`,
   `tracking-[-0.04em]`, stacked and flush. The second word uses an outline
   stroke (`-webkit-text-stroke`) instead of a fill.
-- Marquee items use outlined mono-tinted display text with index numbers.
 - Hover fills flip a full `zinc-100` row (claims) and scale an inner ring
   (custom cursor).
 - Reveal-on-scroll transitions run through `reveal-rise` / `reveal-slide` /
@@ -121,5 +133,11 @@ feel. Rules loosened for this surface only:
 
 Retained from the base system: monochrome zinc (no accent color), sharp
 corners, no gradients or glow, the particle `BackgroundOne` layer (made
-`pointer-events-none`), and the no-em-dash / no-emoji copy rule. This page is
-the exception; Send / Receive and the UI kit stay quiet.
+`pointer-events-none`), and the no-em-dash / no-emoji copy rule.
+
+The Landing treatment now extends to Send / Receive and the Legal pages:
+they share the rail header, display type, hairline sections, film
+grain, and the BackgroundOne backdrop. The editing surfaces inside them stay
+on the base kit (mono micro-labels, flat hairline inputs, underline tabs),
+and the custom dot cursor stays landing-only so interactive pages keep the
+native pointer.

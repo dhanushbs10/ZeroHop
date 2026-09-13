@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
+import { HeaderSlot } from "@/components/header-slot";
 import "./globals.css";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://zerohop.app";
@@ -66,7 +67,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="flex min-h-screen flex-col bg-background text-foreground antialiased">
-        <SiteHeader />
+        <HeaderSlot>
+          <SiteHeader />
+        </HeaderSlot>
         <main className="flex flex-1 flex-col">{children}</main>
       </body>
     </html>

@@ -32,6 +32,8 @@ export interface RoomControllerOptions {
   onDataChannelClosed?: (label: DataChannelLabel) => void;
   onControlMessage?: (message: ControlMessage) => void;
   onChunkReceived?: (frame: FileChunkFrame) => void;
+  onReconnecting?: () => void;
+  onReconnected?: () => void;
   onConnectionFailed?: (reason: string) => void;
   onError?: (error: SignalingError) => void;
 }
@@ -119,6 +121,10 @@ export class RoomController {
   private shareToken: Base64Url | null = null;
   private encryptionKey: CryptoKey | null = null;
 
+  private readonly messageListeners = new Set<
+    (message: ControlMessage) => void
+  >();
+
   constructor(options: RoomControllerOptions) {
     this.signaling = options.signaling;
     this.options = options;
@@ -162,6 +168,7 @@ export class RoomController {
 
   async initiateRoom(): Promise<InitiatedRoom> {
     this.shareToken = generateShareToken();
+    this.encryptionKey = await deriveRoomKey(this.shareToken);
     this.signaling.createRoom();
     const response = await waitForEvent<RoomCreatedResponse>(
       this.signaling.socket,
@@ -207,6 +214,21 @@ export class RoomController {
     return this.encryptionKey;
   }
 
+  async getSecurityFingerprint(): Promise<string> {
+    if (!this.encryptionKey) return "";
+    const raw = await globalThis.crypto.subtle.exportKey(
+      "raw",
+      this.encryptionKey
+    );
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", raw);
+    const bytes = new Uint8Array(digest);
+    let hex = "";
+    for (const byte of bytes) {
+      hex += byte.toString(16).padStart(2, "0");
+    }
+    return hex.slice(0, 6);
+  }
+
   getShareToken(): Base64Url | null {
     return this.shareToken;
   }
@@ -215,12 +237,17 @@ export class RoomController {
     return this.room;
   }
 
-  sendControlMessage(message: ControlMessage): boolean {
-    return this.webrtc?.sendControlMessage(message) ?? false;
+  sendControlMessage(message: ControlMessage): Promise<boolean> {
+    return (this.webrtc?.sendControlMessage(message) ?? Promise.resolve(false));
   }
 
-  sendChunk(frame: FileChunkFrame): boolean {
-    return this.webrtc?.sendChunk(frame) ?? false;
+  async sendChunk(frame: FileChunkFrame): Promise<boolean> {
+    return (await this.webrtc?.sendChunk(frame)) ?? false;
+  }
+
+  onMessage(listener: (message: ControlMessage) => void): () => void {
+    this.messageListeners.add(listener);
+    return () => this.messageListeners.delete(listener);
   }
 
   isFileChannelOpen(): boolean {
@@ -294,6 +321,7 @@ export class RoomController {
     if (this.webrtc) return;
     this.webrtc = new WebRTCManager({
       initiator,
+      encryptionKey: this.encryptionKey,
       onSignal: {
         onOffer: this.handleOffer,
         onAnswer: this.handleAnswer,
@@ -301,8 +329,15 @@ export class RoomController {
       },
       onDataChannelOpen: (label) => this.options.onDataChannelOpen?.(label),
       onDataChannelClosed: (label) => this.options.onDataChannelClosed?.(label),
-      onControlMessage: (message) => this.options.onControlMessage?.(message),
+      onControlMessage: (message) => {
+        this.options.onControlMessage?.(message);
+        for (const listener of this.messageListeners) {
+          listener(message);
+        }
+      },
       onChunkReceived: (frame) => this.options.onChunkReceived?.(frame),
+      onReconnecting: () => this.options.onReconnecting?.(),
+      onReconnected: () => this.options.onReconnected?.(),
       onConnectionFailed: (reason) =>
         this.options.onConnectionFailed?.(reason),
     });

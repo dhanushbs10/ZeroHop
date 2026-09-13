@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+import { Grain } from "@/components/landing/grain";
+
 export const metadata: Metadata = {
   title: "Terms and Conditions",
   description:
@@ -35,19 +37,24 @@ const SECTIONS = [
 
 export default function TermsAndConditionsPage() {
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-16 sm:px-6 sm:py-24">
-      <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-        Draft placeholder
+    <div className="relative mx-auto w-full max-w-3xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
+      <Grain />
+      <h1 className="text-5xl font-semibold tracking-[-0.03em] text-zinc-100 sm:text-6xl">
+        Terms and Conditions
+      </h1>
+      <p className="mt-4 font-mono text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+        Version 0.1 {"\u00B7"} Effective September 13, 2026
       </p>
-      <h1 className="mt-4 text-3xl font-semibold">Terms and Conditions</h1>
-      <p className="mt-2 font-mono text-sm text-muted-foreground">
-        Version 0.1. Effective date: September 13, 2026.
-      </p>
-      <div className="mt-10 space-y-10">
+      <div className="mt-12 flex flex-col">
         {SECTIONS.map((section) => (
-          <section key={section.title}>
-            <h2 className="text-lg font-semibold">{section.title}</h2>
-            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+          <section
+            key={section.title}
+            className="border-t border-zinc-800 py-10"
+          >
+            <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 sm:text-3xl">
+              {section.title}
+            </h2>
+            <p className="mt-6 max-w-prose text-sm leading-relaxed text-zinc-400 sm:pl-10">
               {section.body}
             </p>
           </section>

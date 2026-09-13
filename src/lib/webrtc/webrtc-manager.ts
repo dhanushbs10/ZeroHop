@@ -6,12 +6,21 @@ import {
   FILE_CHUNK_HEADER_OFFSET,
   FILE_CHUNK_INDEX_OFFSET,
   FILE_CHUNK_PAYLOAD_OFFSET,
+  GCM_NONCE_BYTES,
+  GCM_TAG_BYTES,
+  type CipherEnvelope,
   type ControlMessage,
   type DataChannelLabel,
   type FileChunkFrame,
   type IceCandidate,
   type SessionDescription,
 } from "@/lib/types/protocol";
+import {
+  decryptControlMessage,
+  decryptPayload,
+  encryptControlMessage,
+  encryptPayload,
+} from "@/lib/webrtc/crypto";
 
 export interface SdpSignalHandlers {
   onOffer?: (description: SessionDescription) => void;
@@ -21,11 +30,14 @@ export interface SdpSignalHandlers {
 
 export interface WebRTCManagerOptions {
   initiator: boolean;
+  encryptionKey?: CryptoKey | null;
   onSignal?: SdpSignalHandlers;
   onDataChannelOpen?: (label: DataChannelLabel) => void;
   onDataChannelClosed?: (label: DataChannelLabel) => void;
   onControlMessage?: (message: ControlMessage) => void;
   onChunkReceived?: (frame: FileChunkFrame) => void;
+  onReconnecting?: () => void;
+  onReconnected?: () => void;
   onConnectionFailed?: (reason: string) => void;
   iceServers?: RTCIceServer[];
 }
@@ -49,14 +61,33 @@ function parseControlMessage(data: string): ControlMessage {
   return message as ControlMessage;
 }
 
-function parseChunkFrame(buffer: ArrayBuffer): FileChunkFrame {
+function chunkNonce(fileId: number, chunkIndex: number): Uint8Array {
+  const nonce = new Uint8Array(GCM_NONCE_BYTES);
+  const view = new DataView(nonce.buffer);
+  view.setUint32(0, fileId, false);
+  view.setUint32(4, chunkIndex, false);
+  return nonce;
+}
+
+async function parseChunkFrame(
+  buffer: ArrayBuffer,
+  encryptionKey: CryptoKey | null
+): Promise<FileChunkFrame> {
   if (buffer.byteLength < FILE_CHUNK_PAYLOAD_OFFSET) {
     throw new Error("Chunk frame is shorter than its header");
   }
   const view = new DataView(buffer);
   const fileId = view.getUint32(FILE_CHUNK_HEADER_OFFSET, false);
   const chunkIndex = view.getUint32(FILE_CHUNK_INDEX_OFFSET, false);
-  const payload = buffer.slice(FILE_CHUNK_PAYLOAD_OFFSET);
+  const ciphertext = buffer.slice(FILE_CHUNK_PAYLOAD_OFFSET);
+  let payload = ciphertext;
+  if (encryptionKey) {
+    payload = await decryptPayload(
+      encryptionKey,
+      ciphertext,
+      chunkNonce(fileId, chunkIndex).buffer as ArrayBuffer
+    );
+  }
   return { fileId, chunkIndex, payload };
 }
 
@@ -77,17 +108,22 @@ export class WebRTCManager {
   private readonly polite: boolean;
   private readonly options: WebRTCManagerOptions;
   private readonly pc: RTCPeerConnection;
+  private readonly encryptionKey: CryptoKey | null;
 
   private controlChannel: RTCDataChannel | null = null;
   private fileChannel: RTCDataChannel | null = null;
 
+  private sendQueue: Promise<void> = Promise.resolve();
+
   private makingOffer = false;
   private ignoreOffer = false;
+  private reconnecting = false;
 
   constructor(options: WebRTCManagerOptions) {
     this.initiator = options.initiator;
     this.polite = !options.initiator;
     this.options = options;
+    this.encryptionKey = options.encryptionKey ?? null;
 
     this.pc = new RTCPeerConnection({
       iceServers: options.iceServers ?? DEFAULT_ICE_SERVERS,
@@ -118,7 +154,18 @@ export class WebRTCManager {
       });
     };
     this.pc.oniceconnectionstatechange = () => {
-      console.log(`[webrtc] iceConnectionState: ${this.pc.iceConnectionState}`);
+      const state = this.pc.iceConnectionState;
+      console.log(`[webrtc] iceConnectionState: ${state}`);
+      if (state === "disconnected" || state === "failed") {
+        this.handleConnectionDrop();
+      } else if (
+        (state === "connected" || state === "completed") &&
+        this.reconnecting
+      ) {
+        this.reconnecting = false;
+        console.log("[webrtc] ICE connection restored");
+        this.options.onReconnected?.();
+      }
     };
     this.pc.onicegatheringstatechange = () => {
       console.log(`[webrtc] iceGatheringState: ${this.pc.iceGatheringState}`);
@@ -145,6 +192,19 @@ export class WebRTCManager {
       this.createDataChannels();
     }
     void this.makeOffer();
+  }
+
+  private handleConnectionDrop(): void {
+    if (this.pc.signalingState === "closed" || this.reconnecting) return;
+    this.reconnecting = true;
+    console.log(
+      "[webrtc] ICE connection dropped, restarting ICE and renegotiating"
+    );
+    this.options.onReconnecting?.();
+    if (this.initiator) {
+      this.pc.restartIce();
+      void this.makeOffer();
+    }
   }
 
   async handleRemoteDescription(description: SessionDescription): Promise<void> {
@@ -182,14 +242,34 @@ export class WebRTCManager {
     }
   }
 
-  sendControlMessage(message: ControlMessage): boolean {
+  async sendControlMessage(message: ControlMessage): Promise<boolean> {
     const channel = this.controlChannel;
     if (!channel || channel.readyState !== "open") return false;
-    channel.send(JSON.stringify(message));
-    return true;
+
+    const task = async (): Promise<void> => {
+      if (!this.encryptionKey) {
+        channel.send(JSON.stringify(message));
+        return;
+      }
+      const envelope = await encryptControlMessage(
+        this.encryptionKey,
+        JSON.stringify(message)
+      );
+      channel.send(JSON.stringify(envelope));
+    };
+
+    const scheduled = this.sendQueue.then(task);
+    this.sendQueue = scheduled.catch(() => undefined);
+    try {
+      await scheduled;
+      return true;
+    } catch (error) {
+      console.error("[webrtc] Failed to send control message", error);
+      return false;
+    }
   }
 
-  sendChunk(frame: FileChunkFrame): boolean {
+  async sendChunk(frame: FileChunkFrame): Promise<boolean> {
     const channel = this.fileChannel;
     if (!channel || channel.readyState !== "open") return false;
 
@@ -198,11 +278,23 @@ export class WebRTCManager {
     view.setUint32(FILE_CHUNK_HEADER_OFFSET, frame.fileId, false);
     view.setUint32(FILE_CHUNK_INDEX_OFFSET, frame.chunkIndex, false);
 
+    let payload = frame.payload;
+    if (this.encryptionKey) {
+      payload = await encryptPayload(
+        this.encryptionKey,
+        payload,
+        chunkNonce(frame.fileId, frame.chunkIndex).buffer as ArrayBuffer
+      );
+      if (payload.byteLength !== frame.payload.byteLength + GCM_TAG_BYTES) {
+        throw new Error("Encrypted chunk is the wrong length");
+      }
+    }
+
     const merged = new Uint8Array(
-      header.byteLength + frame.payload.byteLength
+      header.byteLength + payload.byteLength
     );
     merged.set(header, FILE_CHUNK_HEADER_OFFSET);
-    merged.set(new Uint8Array(frame.payload), FILE_CHUNK_PAYLOAD_OFFSET);
+    merged.set(new Uint8Array(payload), FILE_CHUNK_PAYLOAD_OFFSET);
 
     channel.send(merged.buffer);
     return true;
@@ -300,10 +392,39 @@ export class WebRTCManager {
     label: DataChannelLabel,
     data: unknown
   ): Promise<void> {
-    if (label === CONTROL_CHANNEL_LABEL) {
-      this.options.onControlMessage?.(parseControlMessage(await toText(data)));
-    } else {
-      this.options.onChunkReceived?.(parseChunkFrame(await toArrayBuffer(data)));
+    try {
+      if (label === CONTROL_CHANNEL_LABEL) {
+        let wire = await toText(data);
+        if (this.encryptionKey) {
+          const envelope = JSON.parse(wire) as unknown;
+          if (
+            envelope === null ||
+            typeof envelope !== "object" ||
+            (envelope as { v?: unknown }).v !== 1 ||
+            typeof (envelope as { nonce?: unknown }).nonce !== "string" ||
+            typeof (envelope as { ciphertext?: unknown }).ciphertext !==
+              "string"
+          ) {
+            throw new Error(
+              "Encrypted control message is not a valid cipher envelope"
+            );
+          }
+          wire = await decryptControlMessage(
+            this.encryptionKey,
+            envelope as CipherEnvelope
+          );
+        }
+        this.options.onControlMessage?.(parseControlMessage(wire));
+      } else {
+        this.options.onChunkReceived?.(
+          await parseChunkFrame(
+            await toArrayBuffer(data),
+            this.encryptionKey
+          )
+        );
+      }
+    } catch (error) {
+      console.error("[webrtc] Failed to route message", error);
     }
   }
 }

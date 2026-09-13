@@ -1,23 +1,25 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, FileDown, Link2, Upload } from "lucide-react";
+import { ArrowRight, Check, Copy, FileDown, Link2 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 
+import { BackgroundOne } from "@/components/backgrounds/BackgroundOne";
 import { Button } from "@/components/ui/button";
+import { Grain } from "@/components/landing/grain";
+import ShareDashboard, { ReceivedMessages } from "@/components/share-dashboard";
+import { rememberPeer, shareProfile } from "@/lib/supabase/buddies";
 import { RoomController } from "@/lib/webrtc/room-controller";
 import { initializeSignaling } from "@/lib/webrtc/signaling-client";
 import {
   CONTROL_CHANNEL_LABEL,
   FILE_CHANNEL_LABEL,
-  MAX_FILE_CHUNK_SIZE,
   type FileChunkFrame,
   type FileStart,
   type RoomCode,
 } from "@/lib/types/protocol";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://zerohop.app";
-const BUFFER_WATERMARK_HIGH = 5 * 1024 * 1024;
-const BUFFER_WATERMARK_LOW = 1024 * 1024;
 
 type Status =
   | "idle"
@@ -26,6 +28,8 @@ type Status =
   | "connected"
   | "sending"
   | "receiving"
+  | "paused"
+  | "reconnecting"
   | "complete"
   | "error";
 
@@ -36,6 +40,8 @@ const STATUS_LABEL: Record<Status, string> = {
   connected: "Connected",
   sending: "Sending...",
   receiving: "Receiving...",
+  paused: "Transfer paused",
+  reconnecting: "Reconnecting...",
   complete: "Transfer complete",
   error: "Something went wrong",
 };
@@ -47,16 +53,112 @@ function StatusDot({ status }: { status: Status }) {
       : status === "sending" ||
           status === "receiving" ||
           status === "waiting" ||
-          status === "starting"
+          status === "starting" ||
+          status === "reconnecting"
         ? "bg-zinc-400"
         : "bg-zinc-600";
   return <span className={`h-1.5 w-1.5 rounded-[1px] ${color}`} />;
 }
 
+function SectionHead({ title }: { title: string }) {
+  return (
+    <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 sm:text-3xl">
+      {title}
+    </h2>
+  );
+}
+
+function RoomPanel({
+  roomCode,
+  shareLink,
+  copied,
+  copiedCode,
+  onCopyRoomCode,
+  onCopyShareLink,
+}: {
+  roomCode: RoomCode;
+  shareLink: string;
+  copied: boolean;
+  copiedCode: boolean;
+  onCopyRoomCode: () => void;
+  onCopyShareLink: () => void;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col">
+          <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+            Room code
+          </span>
+          <span className="mt-3 break-all font-mono text-4xl font-semibold tracking-[0.15em] text-zinc-100 sm:text-5xl">
+            {roomCode}
+          </span>
+        </div>
+        <Button
+          size="sm"
+          onClick={onCopyRoomCode}
+          className="gap-2 rounded-[4px]"
+        >
+          {copiedCode ? (
+            <Check className="h-4 w-4" />
+          ) : (
+            <Copy className="h-4 w-4" />
+          )}
+          {copiedCode ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <div className="flex w-full flex-col gap-6 sm:flex-row">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+            Share link
+          </span>
+          <div className="flex items-center gap-2 rounded-[4px] border border-zinc-800 bg-zinc-950 py-1.5 pl-3 pr-1.5">
+            <input
+              readOnly
+              value={shareLink ?? ""}
+              className="min-w-0 flex-1 bg-transparent font-mono text-xs text-zinc-400 outline-none"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onCopyShareLink}
+              className="shrink-0 gap-2 rounded-[4px]"
+            >
+              {copied ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                <Link2 className="h-4 w-4" />
+              )}
+              {copied ? "Copied" : "Copy Link"}
+            </Button>
+          </div>
+        </div>
+        {shareLink && (
+          <div className="flex shrink-0 flex-col gap-2">
+            <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+              Scan to join
+            </span>
+            <div className="flex items-center justify-center rounded-[4px] border border-zinc-800 bg-zinc-950 p-4">
+              <QRCodeSVG
+                value={shareLink}
+                size={168}
+                level="M"
+                bgColor="#09090b"
+                fgColor="#f4f4f5"
+                marginSize={1}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SendPage() {
   const controllerRef = useRef<RoomController | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const nextFileIdRef = useRef(0);
+  const [activeController, setActiveController] =
+    useState<RoomController | null>(null);
 
   const metaRef = useRef<Map<number, FileStart>>(new Map());
   const chunkStoreRef = useRef<Map<number, Map<number, Uint8Array<ArrayBuffer>>>>(
@@ -69,8 +171,6 @@ export default function SendPage() {
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
-  const [progress, setProgress] = useState(0);
   const [incoming, setIncoming] = useState<{
     fileName: string;
     fileSize: number;
@@ -81,15 +181,16 @@ export default function SendPage() {
     [CONTROL_CHANNEL_LABEL]: false,
     [FILE_CHANNEL_LABEL]: false,
   });
-  const [dragging, setDragging] = useState(false);
+  const [receivedCount, setReceivedCount] = useState(0);
+  const [reconnecting, setReconnecting] = useState(false);
 
-  const connected =
-    channelsOpen[CONTROL_CHANNEL_LABEL] && channelsOpen[FILE_CHANNEL_LABEL];
-  const effectiveStatus: Status =
-    (status === "idle" ||
-      status === "starting" ||
-      status === "waiting") &&
-    connected
+  const connected = channelsOpen[CONTROL_CHANNEL_LABEL];
+  const effectiveStatus: Status = reconnecting
+    ? "reconnecting"
+    : (status === "idle" ||
+        status === "starting" ||
+        status === "waiting") &&
+        connected
       ? "connected"
       : status;
 
@@ -105,8 +206,12 @@ export default function SendPage() {
         const signaling = initializeSignaling();
         const controller = new RoomController({
           signaling,
-          onDataChannelOpen: (label) =>
-            setChannelsOpen((prev) => ({ ...prev, [label]: true })),
+          onDataChannelOpen: (label) => {
+            setChannelsOpen((prev) => ({ ...prev, [label]: true }));
+            if (label === CONTROL_CHANNEL_LABEL && controllerRef.current) {
+              void shareProfile(controllerRef.current);
+            }
+          },
           onDataChannelClosed: (label) =>
             setChannelsOpen((prev) => ({ ...prev, [label]: false })),
           onControlMessage: (message) => {
@@ -183,6 +288,8 @@ export default function SendPage() {
             );
             setStatus("error");
           },
+          onReconnecting: () => setReconnecting(true),
+          onReconnected: () => setReconnecting(false),
           onError: (error) => setErrorMessage(error.message),
         });
         if (disposed) {
@@ -190,6 +297,7 @@ export default function SendPage() {
           return;
         }
         controllerRef.current = controller;
+        setActiveController(controller);
       } catch (error) {
         if (!disposed) {
           setErrorMessage(
@@ -208,11 +316,23 @@ export default function SendPage() {
       disposed = true;
       controllerRef.current?.disconnect();
       controllerRef.current = null;
+      setActiveController(null);
       meta.clear();
       chunks.clear();
       bytes.clear();
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeController) return;
+    return activeController.onMessage((message) => {
+      if (message.kind === "text-message") {
+        setReceivedCount((prev) => prev + 1);
+      } else if (message.kind === "profile-share") {
+        void rememberPeer(activeController, message);
+      }
+    });
+  }, [activeController]);
 
   const initializeRoom = async () => {
     const controller = controllerRef.current;
@@ -258,259 +378,135 @@ export default function SendPage() {
     }
   };
 
-  const waitForFileChannel = async () => {
-    const controller = controllerRef.current;
-    if (!controller) throw new Error("Session is not initialized");
-    const deadline = Date.now() + 10000;
-    while (!controller.isFileChannelOpen()) {
-      if (Date.now() > deadline) {
-        throw new Error("The file channel did not open in time");
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  };
-
-  const transferFile = async (target: File) => {
-    const controller = controllerRef.current;
-    if (!controller) return;
-    setStatus("sending");
-    setProgress(0);
-    try {
-      await waitForFileChannel();
-      const fileId = nextFileIdRef.current++;
-      const totalChunks = Math.ceil(target.size / MAX_FILE_CHUNK_SIZE);
-      controller.sendControlMessage({
-        kind: "file-start",
-        fileId,
-        fileName: target.name,
-        fileSize: target.size,
-        mimeType: target.type || "application/octet-stream",
-        totalChunks,
-      });
-
-      let sentBytes = 0;
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
-        while (controller.getFileBufferedAmount() > BUFFER_WATERMARK_HIGH) {
-          await controller.waitForFileBufferLow(BUFFER_WATERMARK_LOW);
-        }
-        const start = chunkIndex * MAX_FILE_CHUNK_SIZE;
-        const payload = await target
-          .slice(start, start + MAX_FILE_CHUNK_SIZE)
-          .arrayBuffer();
-        controller.sendChunk({ fileId, chunkIndex, payload });
-        sentBytes += payload.byteLength;
-        setProgress(Math.min(100, Math.round((sentBytes / target.size) * 100)));
-      }
-
-      controller.sendControlMessage({
-        kind: "file-end",
-        fileId,
-        chunksVerified: totalChunks,
-      });
-      setProgress(100);
-      setStatus("complete");
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "The transfer failed unexpectedly"
-      );
-      setStatus("error");
-    }
-  };
-
-  const acceptFiles = (files: FileList | File[]) => {
-    if (!connected) return;
-    const target = files[0];
-    if (!target) return;
-    setFile(target);
-    void transferFile(target);
-  };
-
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center px-4 py-16">
-      <h1 className="text-3xl font-semibold tracking-tight text-white">
-        Send
-      </h1>
-      <p className="mt-2 text-sm text-zinc-400">
+    <div className="relative mx-auto flex w-full max-w-5xl flex-1 flex-col px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
+      <BackgroundOne />
+      <Grain />
+
+      <div className="flex items-start justify-between gap-6">
+        <h1 className="text-5xl font-semibold tracking-[-0.03em] text-zinc-100 sm:text-6xl">
+          Send
+        </h1>
+        <div className="inline-flex h-8 shrink-0 items-center gap-2 rounded-[4px] border border-zinc-800 bg-zinc-900/60 px-3 font-mono text-[11px] uppercase tracking-wider text-zinc-300">
+          <StatusDot status={effectiveStatus} />
+          {STATUS_LABEL[effectiveStatus]}
+        </div>
+      </div>
+      <p className="mt-4 max-w-md text-base text-zinc-400">
         Initialize a room, share the link, and transfer files directly.
       </p>
 
-      <div className="mt-8 flex flex-col items-start gap-6">
-        <div className="inline-flex h-8 items-center gap-2 rounded-[4px] border border-zinc-800 bg-zinc-900/60 px-3">
-          <StatusDot status={effectiveStatus} />
-          <span className="text-xs font-medium text-zinc-300">
-            {STATUS_LABEL[effectiveStatus]}
-          </span>
-        </div>
-
+      <div className="mt-12 flex w-full flex-col gap-10">
         {!roomCode ? (
-          <Button
-            size="lg"
-            disabled={status === "starting"}
-            onClick={() => void initializeRoom()}
-            className="rounded-[4px]"
-          >
-            Initialize Room
-          </Button>
-        ) : (
-          <div className="flex w-full flex-col gap-6">
-<div className="flex w-full flex-col gap-5 rounded-[6px] border border-zinc-800 bg-zinc-900/60 p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex flex-col">
-                  <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
-                    Room code
-                  </span>
-                  <span className="mt-1 font-mono text-xl font-semibold tracking-[0.15em] text-white">
-                    {roomCode}
-                  </span>
-                </div>
-                <Button
-                  size="sm"
-                  onClick={() => void copyRoomCode()}
-                  className="gap-2 rounded-[4px]"
-                >
-                  {copiedCode ? (
-                    <Check className="h-4 w-4" />
-                  ) : (
-                    <Copy className="h-4 w-4" />
-                  )}
-                  {copiedCode ? "Copied" : "Copy Code"}
-                </Button>
-              </div>
-              <div className="flex flex-col gap-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
-                  Share link
-                </span>
-                <div className="flex items-center gap-2 rounded-[4px] border border-zinc-800 bg-zinc-950 py-1.5 pl-3 pr-1.5">
-                  <input
-                    readOnly
-                    value={shareLink ?? ""}
-                    className="min-w-0 flex-1 bg-transparent font-mono text-xs text-zinc-400 outline-none"
+          <section className="border-t border-zinc-800 py-10">
+            <SectionHead title="Room" />
+            <div className="mt-7 sm:pl-10">
+              <Button
+                size="lg"
+                disabled={status === "starting"}
+                onClick={() => void initializeRoom()}
+                className="rounded-[4px]"
+              >
+                Initialize Room
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+              <p className="mt-4 max-w-sm text-sm text-zinc-500">
+                Creates an 8-character room code and a share link for the
+                receiver.
+              </p>
+            </div>
+          </section>
+        ) : connected && activeController ? (
+          <div className="flex w-full flex-col lg:flex-row lg:items-start lg:gap-0">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <section className="border-t border-zinc-800 py-10">
+                <SectionHead title="Room" />
+                <div className="mt-7 sm:pl-10">
+                  <RoomPanel
+                    roomCode={roomCode}
+                    shareLink={shareLink ?? ""}
+                    copied={copied}
+                    copiedCode={copiedCode}
+                    onCopyRoomCode={() => void copyRoomCode()}
+                    onCopyShareLink={() => void copyShareLink()}
                   />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void copyShareLink()}
-                    className="shrink-0 gap-2 rounded-[4px]"
-                  >
-                    {copied ? (
-                      <Check className="h-4 w-4" />
-                    ) : (
-                      <Link2 className="h-4 w-4" />
-                    )}
-                    {copied ? "Copied" : "Copy Link"}
-                  </Button>
                 </div>
-              </div>
+              </section>
+
+              <section className="border-t border-zinc-800 py-10">
+                <SectionHead title="Share" />
+                <div className="mt-7 sm:pl-10">
+                  <ShareDashboard controller={activeController} />
+                </div>
+              </section>
+
+              {incoming && (
+                <section className="border-t border-zinc-800 py-10">
+                  <SectionHead title="Received" />
+                  <div className="mt-7 sm:pl-10">
+                    <div className="flex w-full flex-col gap-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <FileDown className="h-4 w-4 shrink-0 text-zinc-400" />
+                          <span className="truncate font-mono text-sm text-zinc-200">
+                            {incoming.fileName}
+                          </span>
+                        </span>
+                        <span className="shrink-0 font-mono text-xs text-zinc-500">
+                          {incoming.progress}%
+                        </span>
+                      </div>
+                      <div className="h-1 w-full overflow-hidden rounded-[2px] bg-zinc-800">
+                        <div
+                          className="h-full rounded-[2px] bg-zinc-300 transition-[width] duration-200"
+                          style={{ width: `${incoming.progress}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              )}
             </div>
 
             <div
-              role="button"
-              tabIndex={connected ? 0 : -1}
-              aria-disabled={!connected}
-              onClick={() => {
-                if (connected) fileInputRef.current?.click();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  if (connected) fileInputRef.current?.click();
-                }
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                if (connected) setDragging(true);
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragging(false);
-                acceptFiles(e.dataTransfer.files);
-              }}
-              className={`flex w-full cursor-default flex-col items-center justify-center gap-4 rounded-[6px] border-2 border-dashed px-6 py-16 text-center transition-colors duration-200 ${
-                connected
-                  ? dragging
-                    ? "cursor-pointer border-zinc-500 bg-zinc-900/70"
-                    : "cursor-pointer border-zinc-700 bg-zinc-900/40 hover:border-zinc-600"
-                  : "border-zinc-800 bg-zinc-900/20 opacity-50"
+              className={`w-full shrink-0 lg:w-[22rem] ${
+                receivedCount === 0 ? "hidden" : ""
               }`}
             >
-              <span className="flex h-11 w-11 items-center justify-center rounded-[4px] border border-zinc-800 bg-zinc-800">
-                <Upload className="h-5 w-5 text-zinc-300" />
-              </span>
-              <div>
-                <p className="font-medium text-white">
-                  Drag and drop files here
-                </p>
-                <p className="mt-1 text-sm text-zinc-500">
-                  {connected
-                    ? "or click to choose a file"
-                    : "waiting for the receiver to connect"}
-                </p>
+              <div className="flex w-full flex-col border-t border-zinc-800 py-10 lg:border-l lg:border-t-0 lg:py-0 lg:pl-10">
+                <ReceivedMessages controller={activeController} />
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="hidden"
-                onChange={(e) => {
-                  const files = e.target.files;
-                  if (files) acceptFiles(files);
-                  e.target.value = "";
-                }}
-              />
             </div>
-
-            {file &&
-              (status === "sending" || status === "complete") && (
-                <div className="rounded-[6px] border border-zinc-800 bg-zinc-900/60 p-4">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="truncate font-medium text-white">
-                      {file.name}
-                    </span>
-                    <span className="ml-4 shrink-0 font-mono text-xs text-zinc-400">
-                      {progress}%
-                    </span>
-                  </div>
-                  <div className="mt-3 h-1.5 w-full overflow-hidden rounded-[2px] bg-zinc-800">
-                    <div
-                      className="h-full rounded-[2px] bg-zinc-300 transition-[width] duration-200"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
+          </div>
+        ) : (
+          <div className="flex w-full flex-col">
+            <section className="border-t border-zinc-800 py-10">
+              <SectionHead title="Room" />
+              <div className="mt-7 sm:pl-10">
+                <RoomPanel
+                  roomCode={roomCode}
+                  shareLink={shareLink ?? ""}
+                  copied={copied}
+                  copiedCode={copiedCode}
+                  onCopyRoomCode={() => void copyRoomCode()}
+                  onCopyShareLink={() => void copyShareLink()}
+                />
+              </div>
+            </section>
+            <section className="border-t border-zinc-800 py-10">
+              <SectionHead title="Share" />
+              <div className="mt-7 sm:pl-10">
+                <div className="flex w-full flex-col items-center gap-4 rounded-[6px] border border-zinc-800 bg-zinc-950 px-6 py-14 text-center">
+                  <p className="font-mono text-sm uppercase tracking-[0.25em] text-zinc-300">
+                    Waiting for the receiver
+                  </p>
+                  <p className="max-w-sm text-sm text-zinc-500">
+                    Share the code and link above. Text, passwords, code, and
+                    files become available once the peer joins.
+                  </p>
                 </div>
-              )}
-
-            <div className="flex w-full flex-col gap-4">
-              <h2 className="text-sm font-medium text-zinc-300">
-                Incoming Files
-              </h2>
-              {incoming ? (
-                <div className="rounded-[6px] border border-zinc-800 bg-zinc-900/60 p-4">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <FileDown className="h-4 w-4 shrink-0 text-zinc-400" />
-                      <span className="truncate font-medium text-white">
-                        {incoming.fileName}
-                      </span>
-                    </span>
-                    <span className="ml-4 shrink-0 font-mono text-xs text-zinc-400">
-                      {incoming.progress}%
-                    </span>
-                  </div>
-                  <div className="mt-3 h-1.5 w-full overflow-hidden rounded-[2px] bg-zinc-800">
-                    <div
-                      className="h-full rounded-[2px] bg-zinc-300 transition-[width] duration-200"
-                      style={{ width: `${incoming.progress}%` }}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-zinc-500">
-                  Files sent by the receiver will appear here.
-                </p>
-              )}
-            </div>
+              </div>
+            </section>
           </div>
         )}
 

@@ -220,25 +220,38 @@ export interface CipherEnvelope {
 export const CONTROL_MESSAGE_KINDS = [
   "text-message",
   "text-message-ack",
+  "share-mode",
   "file-start",
   "file-start-ack",
   "file-ack",
   "file-resume-req",
   "file-end",
   "file-end-ack",
+  "profile-share",
 ] as const;
 
 export type ControlMessageKind = (typeof CONTROL_MESSAGE_KINDS)[number];
 
+export type TextCategory = "text" | "password" | "code";
+
 export interface TextMessage {
   kind: "text-message";
   messageId: string;
+  category: TextCategory;
+  language?: string;
   text: string;
 }
 
 export interface TextMessageAck {
   kind: "text-message-ack";
   messageId: string;
+}
+
+export type ShareMode = "active" | "idle";
+
+export interface ShareModeMessage {
+  kind: "share-mode";
+  mode: ShareMode;
 }
 
 export interface FileStart {
@@ -284,15 +297,23 @@ export interface FileEndAck {
   fileId: FileId;
 }
 
+export interface ProfileShareMessage {
+  kind: "profile-share";
+  userId: string;
+  username: string;
+}
+
 export type ControlMessage =
   | TextMessage
   | TextMessageAck
+  | ShareModeMessage
   | FileStart
   | FileStartAck
   | FileChunkAck
   | FileResumeRequest
   | FileEnd
-  | FileEndAck;
+  | FileEndAck
+  | ProfileShareMessage;
 
 // ---------------------------------------------------------------------------
 // Binary file chunk frame
