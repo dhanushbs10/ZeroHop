@@ -87,12 +87,39 @@ scroll-triggered reveals.
 
 ## Page Grammar
 
-- **Landing** - wordmark, one-line promise, direct primary destination
-  (Begin a transfer) and secondary (Open a room link), then a diagrammatic
-  mechanism proof (two peer marks joined by a dashed path; a quiet note that
-  the signaling server steps out). Three claims in a footer strip, separated
-  by `/`.
+- **Landing** - editorial Awwwards-style surface: a mono data line, a stacked
+  display headline (`FILES` solid / `HOP` outlined), a one-line promise and
+  direct primary (Begin a transfer) + secondary (Join with a room code)
+  CTAs, then a signature Hop moment (SVG SMIL `animateMotion` dot, forward
+  then back, bidirectional, `motion-reduce` static), a looping outlined
+  Marquee of the three claims plus no-account and speed items, three editorial
+  claims rows (01-03) with a full-row `zinc-100` hover fill that flips type to
+  dark, and a `HOP A FILE` close with CTAs. The landing layer adds film grain
+  (`overlay`, 0.08, fixed, canvas-generated) and a custom dot + trailing ring
+  cursor (16% lerp, ring grows on interactive hover, `cursor: none` on the
+  viewport, both gated to `pointer: fine` and no reduced motion).
 - **Send / Receive** - `max-w-xl`, h1 + one-line descriptor, a status pill,
   then the session surface: room code + share link panel, dropzone, and
-  progress. The receive page leads with a share-link join form when no link
-  was opened.
+  progress. The receive page leads with a room-code join form when no link
+  was opened. Unchanged by the Landing treatment.
+
+## Landing Deviations
+
+The Landing page intentionally breaks the base system for a bolder, editorial
+feel. Rules loosened for this surface only:
+
+- Display type scales to `clamp(4rem,18vw,13rem)`, `leading-[0.85]`,
+  `tracking-[-0.04em]`, stacked and flush. The second word uses an outline
+  stroke (`-webkit-text-stroke`) instead of a fill.
+- Marquee items use outlined mono-tinted display text with index numbers.
+- Hover fills flip a full `zinc-100` row (claims) and scale an inner ring
+  (custom cursor).
+- Reveal-on-scroll transitions run through `reveal-rise` / `reveal-slide` /
+  `reveal-clip` at 900ms `cubic-bezier(0.22,1,0.36,1)`, driven by an
+  IntersectionObserver, with `motion-reduce` showing content immediately.
+- Film grain and the custom cursor are landing-layer texture and interaction.
+
+Retained from the base system: monochrome zinc (no accent color), sharp
+corners, no gradients or glow, the particle `BackgroundOne` layer (made
+`pointer-events-none`), and the no-em-dash / no-emoji copy rule. This page is
+the exception; Send / Receive and the UI kit stay quiet.
