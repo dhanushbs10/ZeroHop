@@ -43,3 +43,7 @@ next-env.d.ts
 
 # design tooling
 .impeccable
+
+# auto-generated agent rules (recreated by next dev)
+AGENTS.md
+CLAUDE.md
