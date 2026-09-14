@@ -42,6 +42,30 @@ function debugLog(message: string, details?: Record<string, unknown>): void {
   }
 }
 
+const ALLOWED_ORIGINS = (process.env.SIGNALING_ORIGINS ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter((origin) => origin.length > 0);
+
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_ROOMS = 30;
+const rateLimitHits = new Map<string, number[]>();
+
+function isRateLimited(key: string): boolean {
+  const now = Date.now();
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  const hits = (rateLimitHits.get(key) ?? []).filter((at) => at > windowStart);
+  hits.push(now);
+  rateLimitHits.set(key, hits);
+  if (rateLimitHits.size > 5000) {
+    for (const [storedKey, storedHits] of rateLimitHits) {
+      const latest = storedHits[storedHits.length - 1] ?? 0;
+      if (latest <= windowStart) rateLimitHits.delete(storedKey);
+    }
+  }
+  return hits.length > RATE_LIMIT_MAX_ROOMS;
+}
+
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 interface Room {
@@ -151,7 +175,7 @@ function removePeer(socket: Socket, reason: "manual" | "disconnect" | "timeout")
 }
 
 const app: Express = express();
-app.use(cors({ origin: true }));
+app.use(cors({ origin: ALLOWED_ORIGINS.length > 0 ? ALLOWED_ORIGINS : true }));
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
@@ -159,13 +183,18 @@ app.get("/health", (_req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: true,
+    origin: ALLOWED_ORIGINS.length > 0 ? ALLOWED_ORIGINS : true,
   },
 });
 
 io.on("connection", (socket: Socket) => {
+  const clientKey = socket.handshake.address;
   socket.on("room:create", (payload: RoomCreateRequest) => {
     debugLog("[server] room:create", { socket: socket.id });
+    if (isRateLimited(`create:${clientKey}`)) {
+      emitError(socket, "RATE_LIMITED", "Too many rooms created. Wait a minute and retry.");
+      return;
+    }
     if (registrations.has(socket.id)) {
       emitError(socket, "ALREADY_IN_ROOM", "This connection is already in a room.");
       return;
@@ -211,6 +240,10 @@ io.on("connection", (socket: Socket) => {
       socket: socket.id,
       role: payload.role,
     });
+    if (isRateLimited(`join:${clientKey}`)) {
+      emitError(socket, "RATE_LIMITED", "Too many join attempts. Wait a minute and retry.");
+      return;
+    }
     if (registrations.has(socket.id)) {
       emitError(socket, "ALREADY_IN_ROOM", "This connection is already in a room.");
       return;

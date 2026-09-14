@@ -77,6 +77,8 @@ Required variables:
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL (from Settings -> API). |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon public key (from Settings -> API). |
 | `NEXT_PUBLIC_SIGNALING_URL` | URL of the signaling server (e.g. `http://localhost:3001` locally, or the deployed signaling host). |
+| `SIGNALING_PORT` | Port for the signaling server (server only, default `3001`). |
+| `SIGNALING_ORIGINS` | Comma-separated allowed origins for the signaling server (server only). Leave empty for local development. In production set it to your frontend origin, e.g. `https://zerohop.app`. |
 | `SIGNALING_DEBUG` | Optional. Set to `1` to enable verbose signaling server logs. Leave unset in production. |
 
 ### Supabase Setup
@@ -126,6 +128,8 @@ Open `http://localhost:3000` in two browser tabs or devices. Create a room in on
 1. Deploy `server/index.ts` as a Node.js service.
 2. Ensure the port is exposed (default 3001). Set `NODE_ENV=production`.
 3. Keep `SIGNALING_DEBUG` unset so per-request logs stay off in production.
+4. Set `SIGNALING_ORIGINS` to your frontend origin so only your site can use the signaling server.
+5. The server rate-limits room creation and joins (30 per IP per minute).
 3. Update `NEXT_PUBLIC_SIGNALING_URL` in the frontend env to the deployed signaling host (e.g. `https://zerohop-signaling.onrender.com`).
 
 ### Supabase

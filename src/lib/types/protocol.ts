@@ -161,6 +161,7 @@ export const SIGNALING_ERROR_CODES = [
   "INVALID_MESSAGE",
   "SIGNALING_TIMEOUT",
   "SERVER_ERROR",
+  "RATE_LIMITED",
 ] as const;
 
 export type SignalingErrorCode = (typeof SIGNALING_ERROR_CODES)[number];
