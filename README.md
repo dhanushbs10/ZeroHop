@@ -77,6 +77,7 @@ Required variables:
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL (from Settings -> API). |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon public key (from Settings -> API). |
 | `NEXT_PUBLIC_SIGNALING_URL` | URL of the signaling server (e.g. `http://localhost:3001` locally, or the deployed signaling host). |
+| `SIGNALING_DEBUG` | Optional. Set to `1` to enable verbose signaling server logs. Leave unset in production. |
 
 ### Supabase Setup
 
@@ -95,7 +96,7 @@ In one terminal:
 npm run dev:server
 ```
 
-The server starts on `http://localhost:3001`.
+The server starts on `http://localhost:3001`. Per-request logs stay off unless `SIGNALING_DEBUG=1` is set.
 
 ### Run the Frontend
 
@@ -105,7 +106,7 @@ In another terminal:
 npm run dev
 ```
 
-The app runs on `http://localhost:3000`.
+The app runs on `http://localhost:3000`. (`npm run dev` starts the frontend and the signaling server together via `concurrently`; the separate commands above are for running each process on its own.)
 
 ### Verify
 
@@ -124,6 +125,7 @@ Open `http://localhost:3000` in two browser tabs or devices. Create a room in on
 
 1. Deploy `server/index.ts` as a Node.js service.
 2. Ensure the port is exposed (default 3001). Set `NODE_ENV=production`.
+3. Keep `SIGNALING_DEBUG` unset so per-request logs stay off in production.
 3. Update `NEXT_PUBLIC_SIGNALING_URL` in the frontend env to the deployed signaling host (e.g. `https://zerohop-signaling.onrender.com`).
 
 ### Supabase

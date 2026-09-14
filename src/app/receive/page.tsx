@@ -263,6 +263,11 @@ export default function ReceivePage() {
         },
         onReconnecting: () => setReconnecting(true),
         onReconnected: () => setReconnecting(false),
+        onInternalError: (error) => {
+          if (!isDisposed()) {
+            setErrorMessage(error.message);
+          }
+        },
         onConnectionFailed: (reason) => {
           if (!isDisposed()) {
             setErrorMessage(

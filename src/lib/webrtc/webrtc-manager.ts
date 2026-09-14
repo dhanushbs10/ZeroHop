@@ -39,6 +39,7 @@ export interface WebRTCManagerOptions {
   onReconnecting?: () => void;
   onReconnected?: () => void;
   onConnectionFailed?: (reason: string) => void;
+  onInternalError?: (error: Error) => void;
   iceServers?: RTCIceServer[];
 }
 
@@ -194,8 +195,8 @@ export class WebRTCManager {
           this.options.onSignal?.onAnswer?.(local.toJSON());
         }
       }
-    } catch {
-      return;
+    } catch (error) {
+      this.reportError(error);
     }
   }
 
@@ -348,8 +349,8 @@ export class WebRTCManager {
     label: DataChannelLabel,
     data: unknown
   ): Promise<void> {
-    try {
-      if (label === CONTROL_CHANNEL_LABEL) {
+    if (label === CONTROL_CHANNEL_LABEL) {
+      try {
         let wire = await toText(data);
         if (this.encryptionKey) {
           const envelope = JSON.parse(wire) as unknown;
@@ -371,17 +372,27 @@ export class WebRTCManager {
           );
         }
         this.options.onControlMessage?.(parseControlMessage(wire));
-      } else {
-        this.options.onChunkReceived?.(
-          await parseChunkFrame(
-            await toArrayBuffer(data),
-            this.encryptionKey
-          )
-        );
+      } catch (error) {
+        this.reportError(error);
       }
+      return;
+    }
+    try {
+      this.options.onChunkReceived?.(
+        await parseChunkFrame(
+          await toArrayBuffer(data),
+          this.encryptionKey
+        )
+      );
     } catch {
       return;
     }
+  }
+
+  private reportError(error: unknown): void {
+    const normalized =
+      error instanceof Error ? error : new Error("WebRTC operation failed");
+    this.options.onInternalError?.(normalized);
   }
 }
 

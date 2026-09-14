@@ -290,6 +290,11 @@ export default function SendPage() {
           },
           onReconnecting: () => setReconnecting(true),
           onReconnected: () => setReconnecting(false),
+          onInternalError: (error) => {
+            if (!disposed) {
+              setErrorMessage(error.message);
+            }
+          },
           onError: (error) => setErrorMessage(error.message),
         });
         if (disposed) {

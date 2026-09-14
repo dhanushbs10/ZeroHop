@@ -88,7 +88,7 @@ function highlight(value: string, language: string): string {
 
 function maskPassword(value: string): string {
   const length = Math.min(value.length, 16);
-  return "•".repeat(length);
+  return "*".repeat(length);
 }
 
 function SendButton({

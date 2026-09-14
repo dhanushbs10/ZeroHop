@@ -14,10 +14,9 @@ export interface Buddy {
 const FALLBACK_USERNAME_PREFIX = "user_";
 
 export function formatRelative(value: string): string {
-  const seconds = Math.max(
-    0,
-    Math.floor((Date.now() - new Date(value).getTime()) / 1000)
-  );
+  const timestamp = new Date(value).getTime();
+  if (!value || Number.isNaN(timestamp)) return "unknown";
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
   if (seconds < 45) return "just now";
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return pluralize(minutes, "minute");

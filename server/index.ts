@@ -34,6 +34,13 @@ import {
 
 const PORT = Number(process.env.SIGNALING_PORT ?? 3001);
 const ROOM_TTL_MS = 30 * 60 * 1000;
+const DEBUG_LOGS = process.env.SIGNALING_DEBUG === "1";
+
+function debugLog(message: string, details?: Record<string, unknown>): void {
+  if (DEBUG_LOGS) {
+    console.log(message, details);
+  }
+}
 
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
@@ -113,7 +120,7 @@ function relayToPeer(
     emitError(socket, "PEER_NOT_FOUND", "Target peer is not in this room.");
     return;
   }
-  console.log(
+  debugLog(
     `[server] relaying ${event} from ${socket.id} to ${targetPeerId}`
   );
   target.emit(event, makePayload(socket.id));
@@ -158,7 +165,7 @@ const io = new Server(server, {
 
 io.on("connection", (socket: Socket) => {
   socket.on("room:create", (payload: RoomCreateRequest) => {
-    console.log("[server] room:create", { socket: socket.id });
+    debugLog("[server] room:create", { socket: socket.id });
     if (registrations.has(socket.id)) {
       emitError(socket, "ALREADY_IN_ROOM", "This connection is already in a room.");
       return;
@@ -199,7 +206,7 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("room:join", (payload: RoomJoinRequest) => {
-    console.log("[server] room:join", {
+    debugLog("[server] room:join", {
       roomCode: payload.roomCode,
       socket: socket.id,
       role: payload.role,
@@ -254,7 +261,7 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("room:leave", (payload: RoomLeaveRequest) => {
-    console.log("[server] room:leave", {
+    debugLog("[server] room:leave", {
       roomCode: payload?.roomCode,
       reason: payload?.reason,
       socket: socket.id,
@@ -263,7 +270,7 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("peer:offer", (payload: PeerOfferRequest) => {
-    console.log("[server] peer:offer", {
+    debugLog("[server] peer:offer", {
       roomCode: payload.roomCode,
       from: socket.id,
       to: payload.targetPeerId,
@@ -276,7 +283,7 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("peer:answer", (payload: PeerAnswerRequest) => {
-    console.log("[server] peer:answer", {
+    debugLog("[server] peer:answer", {
       roomCode: payload.roomCode,
       from: socket.id,
       to: payload.targetPeerId,
@@ -289,7 +296,7 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("peer:ice-candidate", (payload: PeerIceCandidateRequest) => {
-    console.log("[server] peer:ice-candidate", {
+    debugLog("[server] peer:ice-candidate", {
       roomCode: payload.roomCode,
       from: socket.id,
       to: payload.targetPeerId,
@@ -304,7 +311,7 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("presence:update", (payload: PresenceUpdateRequest) => {
-    console.log("[server] presence:update", {
+    debugLog("[server] presence:update", {
       roomCode: payload.roomCode,
       socket: socket.id,
       status: payload.status,
@@ -329,7 +336,7 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("disconnect", () => {
-    console.log("[server] disconnect", { socket: socket.id });
+    debugLog("[server] disconnect", { socket: socket.id });
     removePeer(socket, "disconnect");
   });
 });

@@ -35,6 +35,7 @@ export interface RoomControllerOptions {
   onReconnecting?: () => void;
   onReconnected?: () => void;
   onConnectionFailed?: (reason: string) => void;
+  onInternalError?: (error: Error) => void;
   onError?: (error: SignalingError) => void;
 }
 
@@ -134,21 +135,26 @@ export class RoomController {
     socket.on("room:joined", (response) => this.applyRoomJoined(response));
     socket.on("room:peer-joined", (event) => this.applyPeerJoined(event));
     socket.on("room:peer-left", (event) => {
+      if (this.room) {
+        this.room.peers = this.room.peers.filter(
+          (peer) => peer.peerId !== event.peerId
+        );
+      }
       if (event.peerId === this.targetPeerId) {
         this.targetPeerId = null;
       }
     });
     socket.on("room:left", () => this.resetSession());
     socket.on("peer:offer", (event) => {
-      this.targetPeerId ??= event.fromPeerId;
+      if (!this.resolveTargetPeer(event.fromPeerId)) return;
       void this.getWebRTC().handleRemoteDescription(event.sessionDescription);
     });
     socket.on("peer:answer", (event) => {
-      this.targetPeerId ??= event.fromPeerId;
+      if (!this.resolveTargetPeer(event.fromPeerId)) return;
       void this.getWebRTC().handleRemoteDescription(event.sessionDescription);
     });
     socket.on("peer:ice-candidate", (event) => {
-      this.targetPeerId ??= event.fromPeerId;
+      if (!this.resolveTargetPeer(event.fromPeerId)) return;
       void this.getWebRTC().handleIceCandidate(event.candidate);
     });
     socket.on("error", (error) => this.options.onError?.(error));
@@ -303,6 +309,19 @@ export class RoomController {
     }
   }
 
+  private resolveTargetPeer(fromPeerId: PeerId): boolean {
+    if (fromPeerId === this.selfPeerId) return false;
+    if (this.targetPeerId) return fromPeerId === this.targetPeerId;
+    if (this.room) {
+      const known = this.room.peers.some(
+        (peer) => peer.peerId === fromPeerId
+      );
+      if (!known) return false;
+    }
+    this.targetPeerId = fromPeerId;
+    return true;
+  }
+
   private startWebRTC(initiator: boolean): void {
     if (this.webrtc) return;
     this.webrtc = new WebRTCManager({
@@ -326,6 +345,7 @@ export class RoomController {
       onReconnected: () => this.options.onReconnected?.(),
       onConnectionFailed: (reason) =>
         this.options.onConnectionFailed?.(reason),
+      onInternalError: (error) => this.options.onInternalError?.(error),
     });
   }
 
