@@ -6,6 +6,10 @@ const connectSources = isProduction
   ? "connect-src 'self' https: wss: blob:"
   : "connect-src 'self' http: https: ws: wss: blob:";
 
+const scriptSources = isProduction
+  ? "script-src 'self' 'unsafe-inline'"
+  : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
+
 const securityHeaders = [
   { key: "X-DNS-Prefetch-Control", value: "on" },
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -26,7 +30,7 @@ const securityHeaders = [
       "img-src 'self' data: blob:",
       "font-src 'self' data:",
       "style-src 'self' 'unsafe-inline'",
-      "script-src 'self' 'unsafe-inline'",
+      scriptSources,
       connectSources,
       "worker-src 'self' blob:",
     ].join("; "),
