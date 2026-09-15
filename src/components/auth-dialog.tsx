@@ -114,7 +114,10 @@ function AuthDialogContent({ onClose }: { onClose: () => void }) {
         const { data, error: authError } = await getSupabase().auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { username: usernameFromEmail(email.trim()) } },
+          options: {
+            data: { username: usernameFromEmail(email.trim()) },
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          },
         });
         if (authError) throw authError;
         if (data.session) {
@@ -152,7 +155,7 @@ function AuthDialogContent({ onClose }: { onClose: () => void }) {
     }
     const { error: otpError } = await getSupabase().auth.signInWithOtp({
       email: target,
-      options: { emailRedirectTo: `${window.location.origin}/` },
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
     });
     if (otpError) {
       setError(otpError.message);
@@ -170,7 +173,7 @@ function AuthDialogContent({ onClose }: { onClose: () => void }) {
     try {
       const { error: oauthError } = await getSupabase().auth.signInWithOAuth({
         provider,
-        options: { redirectTo: `${window.location.origin}/` },
+        options: { redirectTo: `${window.location.origin}/auth/callback` },
       });
       if (oauthError) setError(oauthError.message);
     } catch (err) {

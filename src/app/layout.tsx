@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import { AuthCodeCleanup } from "@/components/auth-code-cleanup";
 import { SiteHeader } from "@/components/site-header";
 import { HeaderSlot } from "@/components/header-slot";
 import "./globals.css";
@@ -67,6 +68,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="flex min-h-screen flex-col bg-background text-foreground antialiased">
+        <AuthCodeCleanup />
         <HeaderSlot>
           <SiteHeader />
         </HeaderSlot>
