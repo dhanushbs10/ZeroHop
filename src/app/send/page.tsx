@@ -107,41 +107,51 @@ function RoomPanel({
           {copiedCode ? "Copied" : "Copy"}
         </Button>
       </div>
-      <div className="flex w-full flex-col gap-6 sm:flex-row">
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-zinc-500">
-            Share link
-          </span>
-          <div className="flex items-center gap-2 rounded-[4px] border border-zinc-800 bg-zinc-950 py-1.5 pl-3 pr-1.5">
-            <input
-              readOnly
-              value={shareLink ?? ""}
-              className="min-w-0 flex-1 bg-transparent font-mono text-xs text-zinc-400 outline-none"
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onCopyShareLink}
-              className="shrink-0 gap-2 rounded-[4px]"
+      <div className="flex min-w-0 flex-col gap-2">
+        <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+          Share link
+        </span>
+        <div className="flex items-center gap-2 rounded-[4px] border border-zinc-800 bg-zinc-950 py-1.5 pl-3 pr-1.5">
+          <input
+            readOnly
+            value={shareLink ?? ""}
+            className="min-w-0 flex-1 bg-transparent font-mono text-xs text-zinc-400 outline-none"
+          />
+          {shareLink && (
+            <div
+              title="Scan to join"
+              className="hidden shrink-0 rounded-[3px] border border-zinc-800 bg-zinc-950 p-1 sm:flex"
             >
-              {copied ? (
-                <Check className="h-4 w-4" />
-              ) : (
-                <Link2 className="h-4 w-4" />
-              )}
-              {copied ? "Copied" : "Copy Link"}
-            </Button>
-          </div>
-        </div>
-        {shareLink && (
-          <div className="flex shrink-0 flex-col gap-2">
-            <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-zinc-500">
-              Scan to join
-            </span>
-            <div className="flex items-center justify-center rounded-[4px] border border-zinc-800 bg-zinc-950 p-4">
               <QRCodeSVG
                 value={shareLink}
-                size={168}
+                size={32}
+                level="M"
+                bgColor="#09090b"
+                fgColor="#f4f4f5"
+                marginSize={0}
+              />
+            </div>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onCopyShareLink}
+            className="shrink-0 gap-2 rounded-[4px]"
+          >
+            {copied ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              <Link2 className="h-4 w-4" />
+            )}
+            {copied ? "Copied" : "Copy Link"}
+          </Button>
+        </div>
+        {shareLink && (
+          <div className="flex justify-start sm:hidden">
+            <div className="rounded-[4px] border border-zinc-800 bg-zinc-950 p-3">
+              <QRCodeSVG
+                value={shareLink}
+                size={128}
                 level="M"
                 bgColor="#09090b"
                 fgColor="#f4f4f5"
