@@ -98,11 +98,11 @@ function RoomPanel({
           {shareLink && (
             <div
               title="Scan to join"
-              className="flex shrink-0 rounded-[3px] border border-zinc-800 bg-zinc-950 p-1"
+              className="flex shrink-0 rounded-[4px] border border-zinc-800 bg-zinc-950 p-1.5"
             >
               <QRCodeSVG
                 value={shareLink}
-                size={32}
+                size={72}
                 level="M"
                 bgColor="#09090b"
                 fgColor="#f4f4f5"
