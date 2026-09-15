@@ -23,16 +23,17 @@ export function UserMenu() {
 
   useEffect(() => {
     let active = true;
+    let generation = 0;
     getSupabase()
       .auth.getUser()
       .then(({ data }) => {
-        if (active) {
+        if (active && generation === 0) {
           setUser(data.user ?? null);
           setLoading(false);
         }
       })
       .catch(() => {
-        if (active) {
+        if (active && generation === 0) {
           setUser(null);
           setLoading(false);
         }
@@ -40,13 +41,15 @@ export function UserMenu() {
 
     const {
       data: { subscription },
-    } = getSupabase().auth.onAuthStateChange((_event, session) => {
+    } = getSupabase().auth.onAuthStateChange((event, session) => {
+      generation += 1;
       setUser(session?.user ?? null);
       setLoading(false);
     });
 
     return () => {
       active = false;
+      generation += 1;
       subscription.unsubscribe();
     };
   }, []);

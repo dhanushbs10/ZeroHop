@@ -1,5 +1,6 @@
 import {
   CONTROL_CHANNEL_LABEL,
+  CONTROL_MAX_BYTES,
   CONTROL_MESSAGE_KINDS,
   FILE_CHANNEL_LABEL,
   FILE_CHUNK_HEADER_BYTES,
@@ -8,6 +9,8 @@ import {
   FILE_CHUNK_PAYLOAD_OFFSET,
   GCM_NONCE_BYTES,
   GCM_TAG_BYTES,
+  MAX_FILE_CHUNK_SIZE,
+  TEXT_MAX_BYTES,
   type CipherEnvelope,
   type ControlMessage,
   type DataChannelLabel,
@@ -47,7 +50,31 @@ export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
 ];
 
+const FILE_BUFFER_HIGH_WATERMARK = 2 * 1024 * 1024;
+const FILE_BUFFER_LOW_WATERMARK = 512 * 1024;
+const BUFFER_DRAIN_TIMEOUT_MS = 10000;
+const RECONNECT_TIMEOUT_MS = 15000;
+const MAX_FILE_NAME_BYTES = 512;
+const MAX_MIME_TYPE_BYTES = 300;
+const MAX_RESUME_CHUNKS = 2000;
+const MAX_TRACKED_FILE_IDS = 256;
+
+function byteLengthOf(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 function parseControlMessage(data: string): ControlMessage {
+  if (byteLengthOf(data) > CONTROL_MAX_BYTES) {
+    throw new Error("Control message exceeds the size limit");
+  }
   const message: unknown = JSON.parse(data);
   if (typeof message !== "object" || message === null) {
     throw new Error("Control message is not a JSON object");
@@ -59,20 +86,112 @@ function parseControlMessage(data: string): ControlMessage {
   ) {
     throw new Error(`Unknown control message kind: ${String(kind)}`);
   }
+  validateControlMessage(message as ControlMessage);
   return message as ControlMessage;
 }
 
-function chunkNonce(fileId: number, chunkIndex: number): Uint8Array {
+function validateControlMessage(message: ControlMessage): void {
+  switch (message.kind) {
+    case "text-message": {
+      if (byteLengthOf(message.text) > TEXT_MAX_BYTES) {
+        throw new Error("Text message exceeds the size limit");
+      }
+      break;
+    }
+    case "file-start": {
+      if (
+        !Number.isInteger(message.fileId) ||
+        message.fileId < 0 ||
+        message.fileId > 0x7fffffff
+      ) {
+        throw new Error("File id is not valid");
+      }
+      if (
+        !Number.isInteger(message.totalChunks) ||
+        message.totalChunks < 0 ||
+        message.totalChunks > 2147483647
+      ) {
+        throw new Error("Chunk count is not valid");
+      }
+      if (typeof message.fileSize !== "number" || message.fileSize < 0) {
+        throw new Error("File size is not valid");
+      }
+      if (
+        typeof message.fileName !== "string" ||
+        message.fileName.length === 0 ||
+        byteLengthOf(message.fileName) > MAX_FILE_NAME_BYTES
+      ) {
+        throw new Error("File name is not valid");
+      }
+      if (
+        typeof message.mimeType !== "string" ||
+        byteLengthOf(message.mimeType) > MAX_MIME_TYPE_BYTES
+      ) {
+        throw new Error("Mime type is not valid");
+      }
+      break;
+    }
+    case "file-resume-req": {
+      if (
+        !Number.isInteger(message.fileId) ||
+        message.fileId < 0 ||
+        message.fileId > 0x7fffffff
+      ) {
+        throw new Error("File id is not valid");
+      }
+      if (
+        !Array.isArray(message.missingChunks) ||
+        message.missingChunks.length > MAX_RESUME_CHUNKS
+      ) {
+        throw new Error("Resume request is not valid");
+      }
+      break;
+    }
+    case "file-end": {
+      if (
+        !Number.isInteger(message.fileId) ||
+        message.fileId < 0 ||
+        message.fileId > 0x7fffffff
+      ) {
+        throw new Error("File id is not valid");
+      }
+      if (
+        !Number.isInteger(message.chunksVerified) ||
+        message.chunksVerified < 0
+      ) {
+        throw new Error("Chunk verification is not valid");
+      }
+      break;
+    }
+    case "file-ack":
+    case "file-start-ack":
+    case "file-end-ack": {
+      if (
+        !Number.isInteger(message.fileId) ||
+        message.fileId < 0 ||
+        message.fileId > 0x7fffffff
+      ) {
+        throw new Error("File id is not valid");
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+function chunkNonce(seed: Uint8Array, fileId: number): Uint8Array {
   const nonce = new Uint8Array(GCM_NONCE_BYTES);
+  nonce.set(seed.subarray(0, 8), 0);
   const view = new DataView(nonce.buffer);
-  view.setUint32(0, fileId, false);
-  view.setUint32(4, chunkIndex, false);
+  view.setUint32(8, fileId, false);
   return nonce;
 }
 
 async function parseChunkFrame(
   buffer: ArrayBuffer,
-  encryptionKey: CryptoKey | null
+  encryptionKey: CryptoKey | null,
+  seed: Uint8Array
 ): Promise<FileChunkFrame> {
   if (buffer.byteLength < FILE_CHUNK_PAYLOAD_OFFSET) {
     throw new Error("Chunk frame is shorter than its header");
@@ -80,14 +199,21 @@ async function parseChunkFrame(
   const view = new DataView(buffer);
   const fileId = view.getUint32(FILE_CHUNK_HEADER_OFFSET, false);
   const chunkIndex = view.getUint32(FILE_CHUNK_INDEX_OFFSET, false);
+  const maxCipherLength = MAX_FILE_CHUNK_SIZE + GCM_TAG_BYTES;
   const ciphertext = buffer.slice(FILE_CHUNK_PAYLOAD_OFFSET);
   let payload = ciphertext;
   if (encryptionKey) {
+    if (ciphertext.byteLength > maxCipherLength) {
+      throw new Error("Chunk payload is too large");
+    }
     payload = await decryptPayload(
       encryptionKey,
       ciphertext,
-      chunkNonce(fileId, chunkIndex).buffer as ArrayBuffer
+      chunkNonce(seed, fileId).buffer as ArrayBuffer
     );
+  }
+  if (payload.byteLength > MAX_FILE_CHUNK_SIZE) {
+    throw new Error("Chunk payload is too large");
   }
   return { fileId, chunkIndex, payload };
 }
@@ -110,6 +236,8 @@ export class WebRTCManager {
   private readonly options: WebRTCManagerOptions;
   private readonly pc: RTCPeerConnection;
   private readonly encryptionKey: CryptoKey | null;
+  private readonly fileSeeds = new Map<number, Uint8Array>();
+  private readonly pendingIceCandidates: IceCandidate[] = [];
 
   private controlChannel: RTCDataChannel | null = null;
   private fileChannel: RTCDataChannel | null = null;
@@ -119,6 +247,9 @@ export class WebRTCManager {
   private makingOffer = false;
   private ignoreOffer = false;
   private reconnecting = false;
+  private reconnectFailedReported = false;
+  private reconnectDeadlineId: ReturnType<typeof setTimeout> | null = null;
+  private remoteDescriptionSet = false;
 
   constructor(options: WebRTCManagerOptions) {
     this.initiator = options.initiator;
@@ -149,11 +280,18 @@ export class WebRTCManager {
         this.reconnecting
       ) {
         this.reconnecting = false;
+        this.reconnectFailedReported = false;
+        this.clearReconnectDeadline();
         this.options.onReconnected?.();
       }
     };
     this.pc.onconnectionstatechange = () => {
-      if (this.pc.connectionState === "failed") {
+      if (
+        this.pc.connectionState === "failed" &&
+        !this.reconnectFailedReported
+      ) {
+        this.reconnectFailedReported = true;
+        this.clearReconnectDeadline();
         this.options.onConnectionFailed?.("Peer connection failed");
       }
     };
@@ -170,14 +308,33 @@ export class WebRTCManager {
     void this.makeOffer();
   }
 
+  private scheduleReconnectDeadline(): void {
+    if (this.reconnectDeadlineId !== null) return;
+    this.reconnectDeadlineId = setTimeout(() => {
+      this.reconnectDeadlineId = null;
+      if (this.reconnecting && !this.reconnectFailedReported) {
+        this.reconnectFailedReported = true;
+        this.options.onConnectionFailed?.(
+          "The connection could not be re-established in time"
+        );
+      }
+    }, RECONNECT_TIMEOUT_MS);
+  }
+
+  private clearReconnectDeadline(): void {
+    if (this.reconnectDeadlineId !== null) {
+      clearTimeout(this.reconnectDeadlineId);
+      this.reconnectDeadlineId = null;
+    }
+  }
+
   private handleConnectionDrop(): void {
     if (this.pc.signalingState === "closed" || this.reconnecting) return;
     this.reconnecting = true;
     this.options.onReconnecting?.();
-    if (this.initiator) {
-      this.pc.restartIce();
-      void this.makeOffer();
-    }
+    this.scheduleReconnectDeadline();
+    this.pc.restartIce();
+    void this.makeOffer();
   }
 
   async handleRemoteDescription(description: SessionDescription): Promise<void> {
@@ -188,6 +345,8 @@ export class WebRTCManager {
     if (this.ignoreOffer) return;
     try {
       await this.pc.setRemoteDescription(description);
+      this.remoteDescriptionSet = true;
+      await this.flushPendingIceCandidates();
       if (description.type === "offer") {
         await this.pc.setLocalDescription();
         const local = this.pc.localDescription;
@@ -201,10 +360,30 @@ export class WebRTCManager {
   }
 
   async handleIceCandidate(candidate: IceCandidate): Promise<void> {
+    if (!candidate || typeof candidate !== "object") return;
+    if (!this.remoteDescriptionSet) {
+      this.pendingIceCandidates.push(candidate);
+      return;
+    }
     try {
       await this.pc.addIceCandidate(candidate);
     } catch {
-      return;
+      this.pendingIceCandidates.push(candidate);
+      void this.flushPendingIceCandidates();
+    }
+  }
+
+  private async flushPendingIceCandidates(): Promise<void> {
+    while (this.pendingIceCandidates.length > 0) {
+      const candidate = this.pendingIceCandidates[0];
+      try {
+        await this.pc.addIceCandidate(candidate);
+      } catch (error) {
+        this.reportError(error);
+        this.pendingIceCandidates.shift();
+        return;
+      }
+      this.pendingIceCandidates.shift();
     }
   }
 
@@ -212,14 +391,29 @@ export class WebRTCManager {
     const channel = this.controlChannel;
     if (!channel || channel.readyState !== "open") return false;
 
+    if (message.kind === "file-start") {
+      const seed = new Uint8Array(8);
+      globalThis.crypto.getRandomValues(seed);
+      this.fileSeeds.set(message.fileId, seed);
+      message.fileNonce = bytesToBase64Url(seed);
+      if (this.fileSeeds.size > MAX_TRACKED_FILE_IDS) {
+        const oldest = this.fileSeeds.keys().next().value;
+        if (oldest !== undefined) this.fileSeeds.delete(oldest);
+      }
+    }
+
     const task = async (): Promise<void> => {
+      const wire = JSON.stringify(message);
+      if (byteLengthOf(wire) > CONTROL_MAX_BYTES) {
+        throw new Error("Control message exceeds the size limit");
+      }
       if (!this.encryptionKey) {
-        channel.send(JSON.stringify(message));
+        channel.send(wire);
         return;
       }
       const envelope = await encryptControlMessage(
         this.encryptionKey,
-        JSON.stringify(message)
+        wire
       );
       channel.send(JSON.stringify(envelope));
     };
@@ -237,6 +431,34 @@ export class WebRTCManager {
   async sendChunk(frame: FileChunkFrame): Promise<boolean> {
     const channel = this.fileChannel;
     if (!channel || channel.readyState !== "open") return false;
+    if (
+      !Number.isInteger(frame.fileId) ||
+      frame.fileId < 0 ||
+      frame.fileId > 0x7fffffff
+    ) {
+      throw new Error("File id is not valid");
+    }
+    if (
+      !Number.isInteger(frame.chunkIndex) ||
+      frame.chunkIndex < 0 ||
+      frame.chunkIndex > 0x7fffffff
+    ) {
+      throw new Error("Chunk index is not valid");
+    }
+    if (frame.payload.byteLength > MAX_FILE_CHUNK_SIZE) {
+      throw new Error("Chunk payload exceeds the size limit");
+    }
+    const seed = this.fileSeeds.get(frame.fileId);
+    if (!seed) {
+      throw new Error("Chunk was sent before the file was started");
+    }
+    if (channel.bufferedAmount > FILE_BUFFER_HIGH_WATERMARK) {
+      const drained = await this.waitForFileBufferLow(
+        FILE_BUFFER_LOW_WATERMARK,
+        BUFFER_DRAIN_TIMEOUT_MS
+      );
+      if (!drained || channel.readyState !== "open") return false;
+    }
 
     const header = new Uint8Array(FILE_CHUNK_HEADER_BYTES);
     const view = new DataView(header.buffer);
@@ -248,16 +470,14 @@ export class WebRTCManager {
       payload = await encryptPayload(
         this.encryptionKey,
         payload,
-        chunkNonce(frame.fileId, frame.chunkIndex).buffer as ArrayBuffer
+        chunkNonce(seed, frame.fileId).buffer as ArrayBuffer
       );
       if (payload.byteLength !== frame.payload.byteLength + GCM_TAG_BYTES) {
         throw new Error("Encrypted chunk is the wrong length");
       }
     }
 
-    const merged = new Uint8Array(
-      header.byteLength + payload.byteLength
-    );
+    const merged = new Uint8Array(header.byteLength + payload.byteLength);
     merged.set(header, FILE_CHUNK_HEADER_OFFSET);
     merged.set(new Uint8Array(payload), FILE_CHUNK_PAYLOAD_OFFSET);
 
@@ -273,20 +493,39 @@ export class WebRTCManager {
     return this.fileChannel?.bufferedAmount ?? 0;
   }
 
-  async waitForFileBufferLow(threshold: number): Promise<void> {
+  waitForFileBufferLow(
+    threshold: number,
+    timeoutMs = BUFFER_DRAIN_TIMEOUT_MS
+  ): Promise<boolean> {
     const channel = this.fileChannel;
-    if (!channel || channel.bufferedAmount <= threshold) return;
-    channel.bufferedAmountLowThreshold = threshold;
-    await new Promise<void>((resolve) => {
-      const onLow = () => {
+    if (!channel || channel.bufferedAmount <= threshold) {
+      return Promise.resolve(true);
+    }
+    channel.bufferedAmountLowThreshold = Math.min(
+      threshold,
+      channel.bufferedAmount - 1
+    );
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
         channel.removeEventListener("bufferedamountlow", onLow);
-        resolve();
+        resolve(false);
+      }, timeoutMs);
+      const onLow = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        channel.removeEventListener("bufferedamountlow", onLow);
+        resolve(true);
       };
       channel.addEventListener("bufferedamountlow", onLow);
     });
   }
 
   close(): void {
+    this.clearReconnectDeadline();
     for (const channel of [this.controlChannel, this.fileChannel]) {
       if (channel && channel.readyState !== "closed") {
         channel.close();
@@ -304,8 +543,8 @@ export class WebRTCManager {
       if (local) {
         this.options.onSignal?.onOffer?.(local.toJSON());
       }
-    } catch {
-      return;
+    } catch (error) {
+      this.reportError(error);
     } finally {
       this.makingOffer = false;
     }
@@ -371,21 +610,40 @@ export class WebRTCManager {
             envelope as CipherEnvelope
           );
         }
-        this.options.onControlMessage?.(parseControlMessage(wire));
+        const message = parseControlMessage(wire);
+        if (message.kind === "file-start" && message.fileNonce) {
+          this.fileSeeds.set(message.fileId, seedFromBase64Url(message.fileNonce));
+          if (this.fileSeeds.size > MAX_TRACKED_FILE_IDS) {
+            const oldest = this.fileSeeds.keys().next().value;
+            if (oldest !== undefined) this.fileSeeds.delete(oldest);
+          }
+        } else if (message.kind === "file-end") {
+          this.fileSeeds.delete(message.fileId);
+        }
+        this.options.onControlMessage?.(message);
       } catch (error) {
         this.reportError(error);
       }
       return;
     }
     try {
-      this.options.onChunkReceived?.(
-        await parseChunkFrame(
-          await toArrayBuffer(data),
-          this.encryptionKey
-        )
+      const buffer = await toArrayBuffer(data);
+      if (buffer.byteLength < FILE_CHUNK_PAYLOAD_OFFSET) {
+        throw new Error("Chunk frame is shorter than its header");
+      }
+      const fileId = new DataView(buffer).getUint32(
+        FILE_CHUNK_HEADER_OFFSET,
+        false
       );
-    } catch {
-      return;
+      const seed = this.fileSeeds.get(fileId);
+      if (!seed) {
+        throw new Error("Chunk arrived before the file was started");
+      }
+      this.options.onChunkReceived?.(
+        await parseChunkFrame(buffer, this.encryptionKey, seed)
+      );
+    } catch (error) {
+      this.reportError(error);
     }
   }
 
@@ -400,4 +658,18 @@ function channelLabel(label: string): DataChannelLabel {
   return label === CONTROL_CHANNEL_LABEL
     ? CONTROL_CHANNEL_LABEL
     : FILE_CHANNEL_LABEL;
+}
+
+function seedFromBase64Url(value: string): Uint8Array {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(padded);
+  const seed = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    seed[i] = binary.charCodeAt(i);
+  }
+  if (seed.byteLength !== 8) {
+    throw new Error("File nonce has the wrong length");
+  }
+  return seed;
 }

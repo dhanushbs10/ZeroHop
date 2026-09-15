@@ -163,6 +163,7 @@ export default function SendPage() {
     new Map()
   );
   const bytesRef = useRef<Map<number, number>>(new Map());
+  const receivedChunksRef = useRef<Map<number, Set<number>>>(new Map());
 
   const [status, setStatus] = useState<Status>("idle");
   const [roomCode, setRoomCode] = useState<RoomCode | null>(null);
@@ -198,6 +199,7 @@ export default function SendPage() {
     const meta = metaRef.current;
     const chunks = chunkStoreRef.current;
     const bytes = bytesRef.current;
+    const receivedChunks = receivedChunksRef.current;
 
     const setup = async () => {
       try {
@@ -225,7 +227,16 @@ export default function SendPage() {
             } else if (message.kind === "file-end") {
               const entry = meta.get(message.fileId);
               const byFile = chunks.get(message.fileId);
-              if (entry && byFile) {
+              const receivedChunks =
+                receivedChunksRef.current.get(message.fileId) ??
+                new Set<number>();
+              const acquiredBytes = bytes.get(message.fileId) ?? 0;
+              if (
+                entry &&
+                byFile &&
+                receivedChunks.size === entry.totalChunks &&
+                acquiredBytes === entry.fileSize
+              ) {
                 const parts: BlobPart[] = [];
                 for (let i = 0; i < entry.totalChunks; i += 1) {
                   const chunk = byFile.get(i);
@@ -241,19 +252,35 @@ export default function SendPage() {
                 chunks.delete(message.fileId);
                 meta.delete(message.fileId);
                 bytes.delete(message.fileId);
+                receivedChunksRef.current.delete(message.fileId);
                 setIncoming((prev) =>
                   prev ? { ...prev, progress: 100 } : prev
+                );
+              } else {
+                setErrorMessage(
+                  "The transfer was incomplete. Ask the peer to resume or resend the file."
                 );
               }
             }
           },
           onChunkReceived: (frame: FileChunkFrame) => {
+            const metaEntry = meta.get(frame.fileId);
+            if (metaEntry && frame.chunkIndex >= metaEntry.totalChunks) {
+              return;
+            }
             let byFile = chunks.get(frame.fileId);
             if (!byFile) {
               byFile = new Map();
               chunks.set(frame.fileId, byFile);
             }
             byFile.set(frame.chunkIndex, new Uint8Array(frame.payload));
+
+            let receivedChunks = receivedChunksRef.current.get(frame.fileId);
+            if (!receivedChunks) {
+              receivedChunks = new Set();
+              receivedChunksRef.current.set(frame.fileId, receivedChunks);
+            }
+            receivedChunks.add(frame.chunkIndex);
 
             const previous = bytes.get(frame.fileId) ?? 0;
             const updated = previous + frame.payload.byteLength;
@@ -273,7 +300,11 @@ export default function SendPage() {
                       ...prev,
                       progress: Math.min(
                         100,
-                        Math.round((updated / entry.fileSize) * 100)
+                        Math.round(
+                          entry.fileSize === 0
+                            ? 100
+                            : (updated / entry.fileSize) * 100
+                        )
                       ),
                     }
                   : prev
@@ -323,6 +354,7 @@ export default function SendPage() {
       meta.clear();
       chunks.clear();
       bytes.clear();
+      receivedChunks.clear();
     };
   }, []);
 

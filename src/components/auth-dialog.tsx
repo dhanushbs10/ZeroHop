@@ -105,16 +105,16 @@ function AuthDialogContent({ onClose }: { onClose: () => void }) {
     try {
       if (mode === "signin") {
         const { error: authError } = await getSupabase().auth.signInWithPassword(
-          { email, password }
+          { email: email.trim(), password }
         );
         if (authError) throw authError;
         reset();
         onClose();
       } else {
         const { data, error: authError } = await getSupabase().auth.signUp({
-          email,
+          email: email.trim(),
           password,
-          options: { data: { username: usernameFromEmail(email) } },
+          options: { data: { username: usernameFromEmail(email.trim()) } },
         });
         if (authError) throw authError;
         if (data.session) {
@@ -152,6 +152,7 @@ function AuthDialogContent({ onClose }: { onClose: () => void }) {
     }
     const { error: otpError } = await getSupabase().auth.signInWithOtp({
       email: target,
+      options: { emailRedirectTo: `${window.location.origin}/` },
     });
     if (otpError) {
       setError(otpError.message);

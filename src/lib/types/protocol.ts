@@ -60,6 +60,7 @@ export interface RoomCreateRequest {
 export interface RoomJoinRequest {
   roomCode: RoomCode;
   role: PeerRole;
+  clientProtocolVersion?: number;
   displayName?: string;
   resumeToken?: string;
 }
@@ -262,6 +263,7 @@ export interface FileStart {
   fileSize: number;
   mimeType: string;
   totalChunks: ChunkIndex;
+  fileNonce?: Base64Url;
 }
 
 export interface FileStartAck {

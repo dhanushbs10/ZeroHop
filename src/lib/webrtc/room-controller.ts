@@ -87,21 +87,31 @@ async function deriveRoomKey(shareToken: Base64Url): Promise<CryptoKey> {
   );
 }
 
+const WAIT_FOR_EVENT_TIMEOUT_MS = 15000;
+
 function waitForEvent<T>(
   socket: SignalingSocket,
   event: keyof ServerToClientSignaling
 ): Promise<T> {
   const emitter = socket as unknown as LooseEmitter;
   return new Promise<T>((resolve, reject) => {
-    const onError = (error: SignalingError) => {
+    const timer = setTimeout(() => {
       emitter.off("error", onError as (payload: unknown) => void);
+      emitter.off(event, onEvent as (payload: unknown) => void);
+      reject(new Error("The signaling server did not respond in time"));
+    }, WAIT_FOR_EVENT_TIMEOUT_MS);
+    const onError = (error: SignalingError) => {
+      clearTimeout(timer);
+      emitter.off(event, onEvent as (payload: unknown) => void);
       reject(new Error(error.message));
     };
-    socket.once("error", onError);
-    emitter.once(event, (payload) => {
+    const onEvent = (payload: unknown) => {
+      clearTimeout(timer);
       emitter.off("error", onError as (payload: unknown) => void);
       resolve(payload as T);
-    });
+    };
+    socket.once("error", onError);
+    emitter.once(event, onEvent);
   });
 }
 
@@ -158,6 +168,16 @@ export class RoomController {
       void this.getWebRTC().handleIceCandidate(event.candidate);
     });
     socket.on("error", (error) => this.options.onError?.(error));
+    (
+      socket as unknown as {
+        on(event: "connect_error", listener: (error: Error) => void): void;
+      }
+    ).on("connect_error", (error) => {
+      this.options.onError?.({
+        code: "SERVER_ERROR",
+        message: error.message || "Could not reach the signaling server",
+      });
+    });
     socket.on("disconnect", () => {
       this.webrtc?.close();
       this.webrtc = null;
@@ -251,8 +271,10 @@ export class RoomController {
     return this.webrtc?.getFileBufferedAmount() ?? 0;
   }
 
-  waitForFileBufferLow(threshold: number): Promise<void> {
-    return this.webrtc?.waitForFileBufferLow(threshold) ?? Promise.resolve();
+  waitForFileBufferLow(threshold: number): Promise<boolean> {
+    return (
+      this.webrtc?.waitForFileBufferLow(threshold) ?? Promise.resolve(true)
+    );
   }
 
   disconnect(): void {
@@ -311,13 +333,12 @@ export class RoomController {
 
   private resolveTargetPeer(fromPeerId: PeerId): boolean {
     if (fromPeerId === this.selfPeerId) return false;
+    if (!this.room) return false;
     if (this.targetPeerId) return fromPeerId === this.targetPeerId;
-    if (this.room) {
-      const known = this.room.peers.some(
-        (peer) => peer.peerId === fromPeerId
-      );
-      if (!known) return false;
-    }
+    const known = this.room.peers.some(
+      (peer) => peer.peerId === fromPeerId
+    );
+    if (!known) return false;
     this.targetPeerId = fromPeerId;
     return true;
   }

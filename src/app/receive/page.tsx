@@ -57,10 +57,21 @@ function parseJoinHash(hash: string): {
   roomCode: RoomCode;
   shareToken: Base64Url;
 } | null {
-  const match = hash.match(/^#!\/join\/([^?]+)\?t=([^&]+)$/);
-  if (!match) return null;
-  return { roomCode: match[1] as RoomCode, shareToken: match[2] as Base64Url };
+  if (!hash.startsWith("#!/join/")) return null;
+  const raw = hash.slice("#!/join/".length);
+  const tokenIndex = raw.indexOf("?t=");
+  if (tokenIndex === -1) return null;
+  const roomCode = raw.slice(0, tokenIndex);
+  const shareToken = raw.slice(tokenIndex + 3);
+  if (!ROOM_CODE_PATTERN.test(roomCode)) return null;
+  if (!SHARE_TOKEN_PATTERN.test(shareToken)) return null;
+  return {
+    roomCode: roomCode as RoomCode,
+    shareToken: shareToken as Base64Url,
+  };
 }
+
+const SHARE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 
 function parseShareInput(input: string): {
   roomCode: RoomCode;
@@ -70,7 +81,17 @@ function parseShareInput(input: string): {
   if (!trimmed) return null;
   let hash: string;
   try {
-    hash = new URL(trimmed).hash;
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    const allowedHosts = new Set<string>();
+    allowedHosts.add("droplink.app");
+    allowedHosts.add("localhost");
+    if (typeof window !== "undefined") {
+      allowedHosts.add(window.location.host.toLowerCase());
+      allowedHosts.add(window.location.hostname.toLowerCase());
+    }
+    if (!allowedHosts.has(url.hostname.toLowerCase())) return null;
+    hash = url.hash;
   } catch {
     hash = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
   }
@@ -166,11 +187,14 @@ export default function ReceivePage() {
         for (let index = 0; index < target.totalChunks; index += 1) {
           if (!acquired.has(index)) missingChunks.push(index);
         }
-        await client.sendControlMessage({
-          kind: "file-resume-req",
-          fileId: target.fileId,
-          missingChunks,
-        });
+        for (let index = 0; index < missingChunks.length; index += 2000) {
+          const batch = missingChunks.slice(index, index + 2000);
+          await client.sendControlMessage({
+            kind: "file-resume-req",
+            fileId: target.fileId,
+            missingChunks: batch,
+          });
+        }
         setStatus("receiving");
         setErrorMessage(null);
       };
@@ -203,7 +227,15 @@ export default function ReceivePage() {
           } else if (message.kind === "file-end") {
             const entry = metaRef.current.get(message.fileId);
             const byFile = chunkStoreRef.current.get(message.fileId);
-            if (entry && byFile) {
+            const receivedChunks =
+              receivedChunksRef.current.get(message.fileId) ?? new Set<number>();
+            const acquiredBytes = bytesRef.current.get(message.fileId) ?? 0;
+            if (
+              entry &&
+              byFile &&
+              receivedChunks.size === entry.totalChunks &&
+              acquiredBytes === entry.fileSize
+            ) {
               const parts: BlobPart[] = [];
               for (let i = 0; i < entry.totalChunks; i += 1) {
                 const chunk = byFile.get(i);
@@ -219,11 +251,21 @@ export default function ReceivePage() {
               chunkStoreRef.current.delete(message.fileId);
               metaRef.current.delete(message.fileId);
               bytesRef.current.delete(message.fileId);
+              receivedChunksRef.current.delete(message.fileId);
               setStatus("complete");
+            } else {
+              setErrorMessage(
+                "The transfer was incomplete. Ask the sender to resume or resend the file."
+              );
+              setStatus("error");
             }
           }
         },
         onChunkReceived: (frame: FileChunkFrame) => {
+          const metaEntry = metaRef.current.get(frame.fileId);
+          if (metaEntry && frame.chunkIndex >= metaEntry.totalChunks) {
+            return;
+          }
           let byFile = chunkStoreRef.current.get(frame.fileId);
           if (!byFile) {
             byFile = new Map();
@@ -251,7 +293,14 @@ export default function ReceivePage() {
           const entry = metaRef.current.get(frame.fileId);
           if (entry) {
             setProgress(
-              Math.min(100, Math.round((updated / entry.fileSize) * 100)),
+              Math.min(
+                100,
+                Math.round(
+                  entry.fileSize === 0
+                    ? 100
+                    : (updated / entry.fileSize) * 100
+                )
+              )
             );
           }
         },

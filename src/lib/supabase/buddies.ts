@@ -71,7 +71,7 @@ export async function rememberPeer(
   if (message.userId === self.userId) return;
 
   const roomCode = controller.getRoom()?.roomCode ?? null;
-  await getSupabase()
+  const { error } = await getSupabase()
     .from("buddies")
     .upsert(
       {
@@ -82,6 +82,9 @@ export async function rememberPeer(
       },
       { onConflict: "user_id,buddy_id" }
     );
+  if (error) {
+    console.error("Failed to remember buddy:", error.message);
+  }
 }
 
 export async function fetchRecentBuddies(): Promise<{
@@ -93,7 +96,7 @@ export async function fetchRecentBuddies(): Promise<{
   const user = data.user;
   if (!user) return { user: null, buddies: [] };
 
-  const { data: rows } = (await supabase
+  const { data: rows, error } = (await supabase
     .from("buddies")
     .select(
       "buddy_id, room_code, last_connected, profiles!buddies_buddy_id_fkey(username)"
@@ -101,8 +104,13 @@ export async function fetchRecentBuddies(): Promise<{
     .order("last_connected", { ascending: false })
     .limit(20)) as unknown as {
     data: BuddyRow[] | null;
-    error: unknown;
+    error: { message: string } | null;
   };
+
+  if (error) {
+    console.error("Failed to fetch buddies:", error.message);
+    return { user, buddies: [] };
+  }
 
   const buddies: Buddy[] = (rows ?? []).flatMap((row) => {
     const username = Array.isArray(row.profiles)

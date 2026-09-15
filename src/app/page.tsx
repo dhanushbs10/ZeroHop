@@ -43,12 +43,27 @@ export default function Home() {
   useEffect(() => {
     let active = true;
     const supabase = getSupabase();
+    let refreshInFlight = false;
+    let refreshQueued = false;
     const refresh = async () => {
-      const result = await fetchRecentBuddies();
-      if (!active) return;
-      setUser(result.user);
-      setBuddies(result.buddies);
-      setBuddiesLoaded(true);
+      if (refreshInFlight) {
+        refreshQueued = true;
+        return;
+      }
+      refreshInFlight = true;
+      try {
+        const result = await fetchRecentBuddies();
+        if (!active) return;
+        setUser(result.user);
+        setBuddies(result.buddies);
+        setBuddiesLoaded(true);
+      } finally {
+        refreshInFlight = false;
+        if (refreshQueued && active) {
+          refreshQueued = false;
+          void refresh();
+        }
+      }
     };
     void refresh();
     const { data: subscription } = supabase.auth.onAuthStateChange(() => {

@@ -42,6 +42,11 @@ export function initializeSignaling(): SignalingClient {
   const url = requireSignalingUrl();
   const socket: SignalingSocket = io(url, {
     autoConnect: true,
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    timeout: 15000,
   });
 
   return {
@@ -50,7 +55,10 @@ export function initializeSignaling(): SignalingClient {
       socket.emit("room:create", { clientProtocolVersion: PROTOCOL_VERSION });
     },
     joinRoom(request) {
-      socket.emit("room:join", request);
+      socket.emit("room:join", {
+        ...request,
+        clientProtocolVersion: PROTOCOL_VERSION,
+      });
     },
     leaveRoom(request) {
       socket.emit("room:leave", request);

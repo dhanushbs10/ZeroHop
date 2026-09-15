@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { RoomController } from "@/lib/webrtc/room-controller";
 import {
   MAX_FILE_CHUNK_SIZE,
+  TEXT_MAX_BYTES,
   type TextMessage,
 } from "@/lib/types/protocol";
 
@@ -80,10 +81,21 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
+const ALLOWED_LANGUAGES = new Set(["javascript", "typescript", "python", "bash"]);
+
+function isAllowedLanguage(language: string | undefined): boolean {
+  return language !== undefined && ALLOWED_LANGUAGES.has(language);
+}
+
 function highlight(value: string, language: string): string {
+  if (!ALLOWED_LANGUAGES.has(language)) return escapeHtml(value);
   const grammar = Prism.languages[language];
   if (!grammar) return escapeHtml(value);
   return Prism.highlight(value, grammar, language);
+}
+
+function textByteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
 }
 
 function maskPassword(value: string): string {
@@ -146,6 +158,7 @@ export default function ShareDashboard({
   const nextFileIdRef = useRef(0);
   const sentTimerRef = useRef<number | null>(null);
   const clipboardTimerRef = useRef<number | null>(null);
+  const disposedRef = useRef(false);
   const pendingTransfersRef = useRef<
     Map<
       number,
@@ -164,6 +177,12 @@ export default function ShareDashboard({
     const value =
       category === "code" ? code : category === "password" ? password : text;
     if (value.trim().length === 0) return;
+    if (textByteLength(value) > TEXT_MAX_BYTES) {
+      setError(
+        "That message is too large. Keep text and code under 8 KB per message."
+      );
+      return;
+    }
     const effectiveLanguage =
       category === "code" ? detectLanguage(value) : undefined;
     const message: TextMessage = {
@@ -217,6 +236,11 @@ export default function ShareDashboard({
         setError("Your clipboard is empty.");
         return;
       }
+      if (textByteLength(value) > TEXT_MAX_BYTES) {
+        setClipboardState("error");
+        setError("Your clipboard is too large to push in one message.");
+        return;
+      }
       const ok = await controller.sendControlMessage({
         kind: "text-message",
         messageId: globalThis.crypto.randomUUID(),
@@ -248,10 +272,23 @@ export default function ShareDashboard({
   const waitForFileChannel = useCallback(async () => {
     const deadline = Date.now() + 10000;
     while (!controller.isFileChannelOpen()) {
+      if (disposedRef.current) throw transferInterrupted();
       if (Date.now() > deadline) {
         throw new Error("The file channel did not open in time");
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }, [controller]);
+
+  const waitForBufferDrain = useCallback(async () => {
+    while (controller.getFileBufferedAmount() > BUFFER_WATERMARK_HIGH) {
+      while (controller.getFileBufferedAmount() > BUFFER_WATERMARK_LOW) {
+        if (disposedRef.current) throw transferInterrupted();
+        if (!controller.isFileChannelOpen()) {
+          throw transferInterrupted();
+        }
+        await sleep(POLL_INTERVAL_MS);
+      }
     }
   }, [controller]);
 
@@ -290,16 +327,7 @@ export default function ShareDashboard({
 
       let progress = 0;
       for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
-        while (controller.getFileBufferedAmount() > BUFFER_WATERMARK_HIGH) {
-          while (
-            controller.getFileBufferedAmount() > BUFFER_WATERMARK_LOW
-          ) {
-            if (!controller.isFileChannelOpen()) {
-              throw transferInterrupted();
-            }
-            await sleep(POLL_INTERVAL_MS);
-          }
-        }
+        await waitForBufferDrain();
         const start = chunkIndex * MAX_FILE_CHUNK_SIZE;
         const payload = await file
           .slice(start, start + MAX_FILE_CHUNK_SIZE)
@@ -310,7 +338,10 @@ export default function ShareDashboard({
         progress += payload.byteLength;
         setSending({
           name: displayName,
-          progress: Math.min(100, Math.round((progress / file.size) * 100)),
+          progress:
+            file.size === 0
+              ? 100
+              : Math.min(100, Math.round((progress / file.size) * 100)),
         });
       }
 
@@ -323,6 +354,7 @@ export default function ShareDashboard({
       pendingTransfersRef.current.delete(fileId);
       setSending({ name: displayName, progress: 100 });
     } catch (sendError) {
+      if (disposedRef.current) return;
       if (
         sendError instanceof Error &&
         sendError.name === "TransferInterrupted"
@@ -357,16 +389,7 @@ export default function ShareDashboard({
       try {
         await waitForFileChannel();
         for (const chunkIndex of missingChunks) {
-          while (controller.getFileBufferedAmount() > BUFFER_WATERMARK_HIGH) {
-            while (
-              controller.getFileBufferedAmount() > BUFFER_WATERMARK_LOW
-            ) {
-              if (!controller.isFileChannelOpen()) {
-                throw transferInterrupted();
-              }
-              await sleep(POLL_INTERVAL_MS);
-            }
-          }
+          await waitForBufferDrain();
           const start = chunkIndex * MAX_FILE_CHUNK_SIZE;
           const payload = await pending.file
             .slice(start, start + MAX_FILE_CHUNK_SIZE)
@@ -392,6 +415,7 @@ export default function ShareDashboard({
         setPaused(false);
         setSending({ name: pending.name, progress: 100 });
       } catch (resumeError) {
+        if (disposedRef.current) return;
         if (
           resumeError instanceof Error &&
           resumeError.name === "TransferInterrupted"
@@ -408,10 +432,12 @@ export default function ShareDashboard({
         pendingTransfersRef.current.delete(fileId);
       }
     },
-    [controller, waitForFileChannel]
+    [controller, waitForFileChannel, waitForBufferDrain]
   );
 
   useEffect(() => {
+    disposedRef.current = false;
+    const pendingTransfers = pendingTransfersRef.current;
     const unsubscribe = controller.onMessage((message) => {
       if (message.kind === "share-mode") {
         if (message.mode === "active") {
@@ -425,6 +451,7 @@ export default function ShareDashboard({
       }
     });
     return () => {
+      disposedRef.current = true;
       unsubscribe();
       if (sentTimerRef.current !== null) {
         window.clearTimeout(sentTimerRef.current);
@@ -432,6 +459,7 @@ export default function ShareDashboard({
       if (clipboardTimerRef.current !== null) {
         window.clearTimeout(clipboardTimerRef.current);
       }
+      pendingTransfers.clear();
     };
   }, [controller, resumeTransfer]);
 
@@ -870,7 +898,12 @@ export function ReceivedMessages({
                     <code
                       className={`received-code language-${message.language ?? ""}`}
                       dangerouslySetInnerHTML={{
-                        __html: highlight(message.text, message.language ?? ""),
+                        __html: highlight(
+                          message.text,
+                          isAllowedLanguage(message.language)
+                            ? (message.language as string)
+                            : ""
+                        ),
                       }}
                     />
                   </pre>
