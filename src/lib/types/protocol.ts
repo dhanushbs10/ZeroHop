@@ -15,8 +15,8 @@ export const GCM_TAG_BYTES = 16;
 export const GCM_NONCE_BYTES = 12;
 export const AES_256_KEY_BYTES = 32;
 
-export const HKDF_SALT = "zerohop-signal-v1";
-export const HKDF_INFO = "zerohop-aes-256-gcm-v1";
+export const HKDF_SALT = "droplink-signal-v1";
+export const HKDF_INFO = "droplink-aes-256-gcm-v1";
 
 // ---------------------------------------------------------------------------
 // Identity and roles
@@ -189,8 +189,8 @@ export interface ServerToClientSignaling {
 // DataChannel transport
 // ---------------------------------------------------------------------------
 
-export const CONTROL_CHANNEL_LABEL = "zerohop-control";
-export const FILE_CHANNEL_LABEL = "zerohop-file";
+export const CONTROL_CHANNEL_LABEL = "droplink-control";
+export const FILE_CHANNEL_LABEL = "droplink-file";
 
 export type DataChannelLabel = typeof CONTROL_CHANNEL_LABEL | typeof FILE_CHANNEL_LABEL;
 

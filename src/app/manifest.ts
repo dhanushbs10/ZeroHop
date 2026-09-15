@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "ZeroHop - Secure peer-to-peer file and text transfer",
-    short_name: "ZeroHop",
+    name: "DropLink - Secure peer-to-peer file and text transfer",
+    short_name: "DropLink",
     description:
       "Transfer files directly between browsers over WebRTC with AES-256-GCM end-to-end encryption.",
     start_url: "/",

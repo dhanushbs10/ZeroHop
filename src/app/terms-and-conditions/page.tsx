@@ -5,17 +5,17 @@ import { Grain } from "@/components/landing/grain";
 export const metadata: Metadata = {
   title: "Terms and Conditions",
   description:
-    "The terms that govern use of the ZeroHop peer-to-peer transfer service. Draft placeholder.",
+    "The terms that govern use of the DropLink peer-to-peer transfer service. Draft placeholder.",
 };
 
 const SECTIONS = [
   {
     title: "Acceptance",
-    body: "By accessing or using ZeroHop, you agree to these terms. If you do not agree, you may not use the service.",
+    body: "By accessing or using DropLink, you agree to these terms. If you do not agree, you may not use the service.",
   },
   {
     title: "Service description",
-    body: "ZeroHop provides peer-to-peer file and text transfer between browsers. The service coordinates connections and does not intermediate transfer payloads.",
+    body: "DropLink provides peer-to-peer file and text transfer between browsers. The service coordinates connections and does not intermediate transfer payloads.",
   },
   {
     title: "Responsibility for content",

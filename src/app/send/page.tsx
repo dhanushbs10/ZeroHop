@@ -19,7 +19,7 @@ import {
   type RoomCode,
 } from "@/lib/types/protocol";
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://zerohop.app";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://droplink.app";
 
 type Status =
   | "idle"

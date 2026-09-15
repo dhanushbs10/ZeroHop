@@ -1,8 +1,8 @@
-# ZeroHop Communication Protocol
+# DropLink Communication Protocol
 
 Status: draft. Version: 1.
 
-Scope: this document specifies the contract between the ZeroHop browser client, the signaling server, and the WebRTC peer. It defines message shapes and data layouts only. It intentionally contains no implementation logic.
+Scope: this document specifies the contract between the DropLink browser client, the signaling server, and the WebRTC peer. It defines message shapes and data layouts only. It intentionally contains no implementation logic.
 
 ## 1. Transport overview
 
@@ -103,8 +103,8 @@ Example error doc:
 
 | Channel | Label | ordered | reliable | Carries |
 | --- | --- | --- | --- | --- |
-| Control | `zerohop-control` | true | true | JSON control messages |
-| File | `zerohop-file` | false | true | Binary chunk frames |
+| Control | `droplink-control` | true | true | JSON control messages |
+| File | `droplink-file` | false | true | Binary chunk frames |
 
 - The control channel is mandatory and is opened first. The file channel is opened lazily before the first `file-start`.
 - A control channel message is exactly one JSON value per DataChannel message, encoded UTF-8, capped at `CONTROL_MAX_BYTES` (16 KB).
@@ -203,13 +203,13 @@ Example: a 33,000 byte file with 16 KB chunks is sent as 3 frames of payload siz
 ### 5.1 Key generation and the URL fragment
 
 - The sender generates `shareToken` as 32 random bytes (256 bit), base64url encoded.
-- Share URL shape: `https://zerohop.app/receive#!/join/<roomCode>?t=<shareToken>`. The fragment content is the contract; the exact route prefix is not.
+- Share URL shape: `https://droplink.app/receive#!/join/<roomCode>?t=<shareToken>`. The fragment content is the contract; the exact route prefix is not.
 - Browsers never send the URL fragment to any server. The signaling server and analytics can see `roomCode` but never `shareToken`.
 - `roomCode` and `shareToken` are distinct: the code routes signaling, and the token derives the encryption key.
 
 ### 5.2 Key derivation
 
-- HKDF-SHA256 with IKM equal to the raw `shareToken` bytes, salt `"zerohop-signal-v1"`, and info `"zerohop-aes-256-gcm-v1"`.
+- HKDF-SHA256 with IKM equal to the raw `shareToken` bytes, salt `"droplink-signal-v1"`, and info `"droplink-aes-256-gcm-v1"`.
 - Output length is 32 bytes, the AES-256-GCM key.
 - The key exists only in the browser and never appears in any signaling or control message.
 

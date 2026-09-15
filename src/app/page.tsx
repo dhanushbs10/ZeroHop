@@ -91,7 +91,7 @@ export default function Home() {
             <span className="flex h-7 w-7 items-center justify-center rounded-[4px] border border-zinc-800 bg-zinc-900">
               <Zap className="h-3.5 w-3.5 text-zinc-300" />
             </span>
-            <span className="text-zinc-300">ZeroHop</span>
+            <span className="text-zinc-300">DropLink</span>
           </span>
           <div className="flex items-center gap-6">
             <nav className="flex items-center gap-6">
@@ -117,23 +117,23 @@ export default function Home() {
 <Reveal variant="clip" delay={80}>
             <h1
               ref={wipeRef}
-              aria-label="ZeroHop"
+              aria-label="DropLink"
               onMouseMove={handleWipe}
               onMouseLeave={handleWipeLeave}
               className="relative inline-block text-[clamp(4.5rem,20vw,16rem)] font-semibold leading-[0.85] tracking-[-0.045em]"
             >
               <span aria-hidden className="block text-zinc-100">
-                ZERO
+                DROP
               </span>
               <span aria-hidden className="wipe-word-outline block">
-                HOP
+                LINK
               </span>
               <span
                 aria-hidden
                 className="wipe-text absolute inset-0 left-0 top-0"
               >
-                <span className="wipe-word-cutout block">ZERO</span>
-                <span className="block text-zinc-100">HOP</span>
+                <span className="wipe-word-cutout block">DROP</span>
+                <span className="block text-zinc-100">LINK</span>
               </span>
             </h1>
           </Reveal>

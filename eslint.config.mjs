@@ -13,6 +13,8 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "server/**",
+    // Generated standalone signaling bundle.
+    "deploy/**",
   ]),
 ]);
 

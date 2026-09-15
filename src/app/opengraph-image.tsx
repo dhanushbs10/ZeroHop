@@ -2,7 +2,7 @@ import { ImageResponse } from "next/og";
 
 export const runtime = "nodejs";
 
-export const alt = "ZeroHop - Secure peer-to-peer file and text transfer";
+export const alt = "DropLink - Secure peer-to-peer file and text transfer";
 export const size = {
   width: 1200,
   height: 630,
@@ -34,7 +34,7 @@ export default async function OpenGraphImage() {
             color: "#71717a",
           }}
         >
-          ZEROHOP
+DROPLINK
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           <div
@@ -66,7 +66,7 @@ export default async function OpenGraphImage() {
           }}
         >
           <span>WEBRTC : AES-256-GCM</span>
-          <span>ZEROHOP.APP</span>
+          <span>DROPLINK.APP</span>
         </div>
       </div>
     ),

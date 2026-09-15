@@ -16,7 +16,7 @@ People who need to move files between two devices they coordinate themselves: a 
 
 ## Product Purpose
 
-ZeroHop transfers files directly between two browsers over WebRTC data channels. The sending room, share link, chunked transfer with backpressure, reassembly, and auto-download are the product. Success is a file the receiver can open, transferred completely, without the sender ever uploading it anywhere.
+DropLink transfers files directly between two browsers over WebRTC data channels. The sending room, share link, chunked transfer with backpressure, reassembly, and auto-download are the product. Success is a file the receiver can open, transferred completely, without the sender ever uploading it anywhere.
 
 ## Positioning
 
@@ -26,7 +26,7 @@ Zero-knowledge peer-to-peer transfer: the signaling server only brokers the WebR
 
 - Sender visits /send, initializes a room, and gets a room code plus a share link of the form /receive#!/join/{code}?t={token}.
 - Receiver opens the link (or enters the room code) on /receive; the join data travels in the URL hash.
-- Once connected, a control channel (zerohop-control) and a file channel (zerohop-file) open. Both peers can send and receive: drag and drop a file, chunks flow with backpressure + file-ack, the receiving side reassembles and auto-downloads.
+- Once connected, a control channel (droplink-control) and a file channel (droplink-file) open. Both peers can send and receive: drag and drop a file, chunks flow with backpressure + file-ack, the receiving side reassembles and auto-downloads.
 - Transfer is unencrypted at the WebRTC level today; the AES-256-GCM protocol types exist but are not wired into transport.
 
 ## Capabilities and Constraints

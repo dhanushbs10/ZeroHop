@@ -1,8 +1,8 @@
-# ZeroHop
+# DropLink
 
-ZeroHop - Secure, peer-to-peer file and text transfer.
+DropLink - Secure, peer-to-peer file and text transfer.
 
-ZeroHop uses WebRTC for direct browser-to-browser connections and AES-256-GCM End-to-End Encryption. No file data ever touches a server. Transfers run entirely between the two participants; the signaling server only coordinates the initial handshake.
+DropLink uses WebRTC for direct browser-to-browser connections and AES-256-GCM End-to-End Encryption. No file data ever touches a server. Transfers run entirely between the two participants; the signaling server only coordinates the initial handshake.
 
 ## Features
 
@@ -31,7 +31,7 @@ ZeroHop uses WebRTC for direct browser-to-browser connections and AES-256-GCM En
 
 ## Architecture
 
-ZeroHop splits into three pieces:
+DropLink splits into three pieces:
 
 1. **Next.js Frontend** (this repository) - pages for Send, Receive, Share Dashboard, and the landing page. Runs on Vercel or any Node host.
 2. **Socket.io Signaling Server** (`server/index.ts`) - lightweight WebSocket server that relays SDP offers, answers, and ICE candidates between peers. Does not see encrypted payloads. Deploys to Render, Fly.io, or any Node host.
@@ -73,12 +73,12 @@ Required variables:
 
 | Variable | Description |
 |----------|-------------|
-| `NEXT_PUBLIC_SITE_URL` | Public URL of the deployed frontend (e.g. `https://zerohop.app`). Used for canonical URLs and Open Graph. |
+| `NEXT_PUBLIC_SITE_URL` | Public URL of the deployed frontend (e.g. `https://droplink.app`). Used for canonical URLs and Open Graph. |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL (from Settings -> API). |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon public key (from Settings -> API). |
 | `NEXT_PUBLIC_SIGNALING_URL` | URL of the signaling server (e.g. `http://localhost:3001` locally, or the deployed signaling host). |
 | `SIGNALING_PORT` | Port for the signaling server (server only, default `3001`). |
-| `SIGNALING_ORIGINS` | Comma-separated allowed origins for the signaling server (server only). Leave empty for local development. In production set it to your frontend origin, e.g. `https://zerohop.app`. |
+| `SIGNALING_ORIGINS` | Comma-separated allowed origins for the signaling server (server only). Leave empty for local development. In production set it to your frontend origin, e.g. `https://droplink.app`. |
 | `SIGNALING_DEBUG` | Optional. Set to `1` to enable verbose signaling server logs. Leave unset in production. |
 
 ### Supabase Setup
@@ -130,7 +130,7 @@ Open `http://localhost:3000` in two browser tabs or devices. Create a room in on
 3. Keep `SIGNALING_DEBUG` unset so per-request logs stay off in production.
 4. Set `SIGNALING_ORIGINS` to your frontend origin so only your site can use the signaling server.
 5. The server rate-limits room creation and joins (30 per IP per minute).
-3. Update `NEXT_PUBLIC_SIGNALING_URL` in the frontend env to the deployed signaling host (e.g. `https://zerohop-signaling.onrender.com`).
+3. Update `NEXT_PUBLIC_SIGNALING_URL` in the frontend env to the deployed signaling host (e.g. `https://droplink-signaling.onrender.com`).
 
 ### Supabase
 

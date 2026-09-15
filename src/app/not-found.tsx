@@ -96,7 +96,7 @@ export default function NotFound() {
 
         <div className="flex items-center justify-between border-t border-zinc-800/80 py-4 font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-600">
           <span>Status : route not found</span>
-          <span className="hidden sm:inline">ZeroHop : no server in the data path</span>
+          <span className="hidden sm:inline">DropLink : no server in the data path</span>
         </div>
       </section>
     </div>

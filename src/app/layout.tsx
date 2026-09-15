@@ -4,7 +4,7 @@ import { SiteHeader } from "@/components/site-header";
 import { HeaderSlot } from "@/components/header-slot";
 import "./globals.css";
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://zerohop.app";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://droplink.app";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -21,12 +21,12 @@ const jetBrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "ZeroHop | Peer-to-peer file and text transfer",
-    template: "%s | ZeroHop",
+    default: "DropLink | Peer-to-peer file and text transfer",
+    template: "%s | DropLink",
   },
   description:
     "Transfer 5GB+ files directly. Peer-to-peer, end-to-end encrypted transfers over WebRTC. Same-network peers route at full local speed with no server in the data path.",
-  applicationName: "ZeroHop",
+  applicationName: "DropLink",
   keywords: [
     "peer to peer",
     "file transfer",
@@ -39,8 +39,8 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: SITE_URL,
-    siteName: "ZeroHop",
-    title: "ZeroHop | Peer-to-peer file and text transfer",
+    siteName: "DropLink",
+    title: "DropLink | Peer-to-peer file and text transfer",
     description:
       "Transfer 5GB+ files directly. Peer-to-peer, end-to-end encrypted transfers over WebRTC.",
   },

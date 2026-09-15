@@ -375,5 +375,5 @@ io.on("connection", (socket: Socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[zerohop] signaling server listening on http://localhost:${PORT}`);
+  console.log(`[droplink] signaling server listening on http://localhost:${PORT}`);
 });

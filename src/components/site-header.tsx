@@ -10,7 +10,7 @@ export function SiteHeader() {
         <span className="flex h-7 w-7 items-center justify-center rounded-[4px] border border-zinc-800 bg-zinc-900">
           <Zap className="h-3.5 w-3.5 text-zinc-300" />
         </span>
-        <span className="text-zinc-300">ZeroHop</span>
+        <span className="text-zinc-300">DropLink</span>
       </Link>
       <div className="flex items-center gap-6">
         <nav className="flex items-center gap-6">

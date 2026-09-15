@@ -1,4 +1,4 @@
-# ZeroHop Design
+# DropLink Design
 
 <!-- impeccable:design-schema 1 -->
 
@@ -90,10 +90,10 @@ scroll-triggered reveals.
 - **Landing** - editorial Awwwards-style surface with no site header (hidden
   by `HeaderSlot`; the wordmark and Send/Receive links move into the hero
   top rail). A full-viewport centered hero holds a giant stacked headline
-  (`ZERO` solid / `HOP` outlined) flanked by a top rail (Zap badge + wordmark,
+  (`DROP` solid / `LINK` outlined) flanked by a top rail (Zap badge + wordmark,
   right corner nav), a promise + CTAs (Begin a transfer / Join with a room
   code). Below: three editorial claims rows with a full-row `zinc-100`
-  hover fill that flips type to dark, and a `HOP A FILE` close with CTAs. The
+  hover fill that flips type to dark, and a `LINK A FILE` close with CTAs. The
   landing layer adds film grain (`overlay`, 0.08, fixed, canvas-generated) and
   a custom dot + trailing ring cursor (16% lerp, ring grows on interactive
   hover, `cursor: none` on the viewport, both gated to `pointer: fine` and no

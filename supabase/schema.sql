@@ -1,4 +1,4 @@
--- ZeroHop accounts and history schema.
+-- DropLink accounts and history schema.
 -- Run this in the Supabase SQL editor after enabling Auth.
 
 -- User profiles. One row per authenticated user, created from the

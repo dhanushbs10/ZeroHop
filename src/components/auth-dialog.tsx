@@ -183,7 +183,7 @@ function AuthDialogContent({ onClose }: { onClose: () => void }) {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="ZeroHop account"
+      aria-label="DropLink account"
       className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-5 backdrop-blur-sm"
     >
       <div
@@ -199,7 +199,7 @@ function AuthDialogContent({ onClose }: { onClose: () => void }) {
             </span>
             <div className="flex flex-col">
               <span className="font-mono text-[11px] uppercase tracking-[0.25em] text-zinc-200">
-                ZeroHop
+                DropLink
               </span>
               <span className="mt-0.5 text-xs text-zinc-600">
                 Secure peer-to-peer transfer
