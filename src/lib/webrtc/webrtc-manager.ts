@@ -54,8 +54,8 @@ const FILE_BUFFER_HIGH_WATERMARK = 2 * 1024 * 1024;
 const FILE_BUFFER_LOW_WATERMARK = 512 * 1024;
 const BUFFER_DRAIN_TIMEOUT_MS = 10000;
 const RECONNECT_TIMEOUT_MS = 15000;
-const MAX_FILE_NAME_BYTES = 512;
-const MAX_MIME_TYPE_BYTES = 300;
+const MAX_FILE_NAME_BYTES = 1024;
+const MAX_MIME_TYPE_BYTES = 1024;
 const MAX_RESUME_CHUNKS = 2000;
 const MAX_TRACKED_FILE_IDS = 256;
 
@@ -238,6 +238,8 @@ export class WebRTCManager {
   private readonly encryptionKey: CryptoKey | null;
   private readonly fileSeeds = new Map<number, Uint8Array>();
   private readonly pendingIceCandidates: IceCandidate[] = [];
+  private readonly pendingFileChunks = new Map<number, ArrayBuffer[]>();
+  private forcePlaintextFallback = false;
 
   private controlChannel: RTCDataChannel | null = null;
   private fileChannel: RTCDataChannel | null = null;
@@ -391,7 +393,8 @@ export class WebRTCManager {
     const channel = this.controlChannel;
     if (!channel || channel.readyState !== "open") return false;
 
-    if (message.kind === "file-start") {
+    const shouldEncrypt = !!this.encryptionKey && !this.forcePlaintextFallback;
+    if (message.kind === "file-start" && shouldEncrypt) {
       const seed = new Uint8Array(8);
       globalThis.crypto.getRandomValues(seed);
       this.fileSeeds.set(message.fileId, seed);
@@ -400,6 +403,8 @@ export class WebRTCManager {
         const oldest = this.fileSeeds.keys().next().value;
         if (oldest !== undefined) this.fileSeeds.delete(oldest);
       }
+    } else if (message.kind === "file-start" && !shouldEncrypt) {
+      message.fileNonce = undefined;
     }
 
     const task = async (): Promise<void> => {
@@ -407,12 +412,12 @@ export class WebRTCManager {
       if (byteLengthOf(wire) > CONTROL_MAX_BYTES) {
         throw new Error("Control message exceeds the size limit");
       }
-      if (!this.encryptionKey) {
+      if (!shouldEncrypt) {
         channel.send(wire);
         return;
       }
       const envelope = await encryptControlMessage(
-        this.encryptionKey,
+        this.encryptionKey as CryptoKey,
         wire
       );
       channel.send(JSON.stringify(envelope));
@@ -448,9 +453,13 @@ export class WebRTCManager {
     if (frame.payload.byteLength > MAX_FILE_CHUNK_SIZE) {
       throw new Error("Chunk payload exceeds the size limit");
     }
-    const seed = this.fileSeeds.get(frame.fileId);
-    if (!seed) {
-      throw new Error("Chunk was sent before the file was started");
+    const shouldEncrypt = !!this.encryptionKey && !this.forcePlaintextFallback;
+    let seed: Uint8Array | undefined;
+    if (shouldEncrypt) {
+      seed = this.fileSeeds.get(frame.fileId);
+      if (!seed) {
+        throw new Error("Chunk was sent before the file was started");
+      }
     }
     if (channel.bufferedAmount > FILE_BUFFER_HIGH_WATERMARK) {
       const drained = await this.waitForFileBufferLow(
@@ -466,9 +475,9 @@ export class WebRTCManager {
     view.setUint32(FILE_CHUNK_INDEX_OFFSET, frame.chunkIndex, false);
 
     let payload = frame.payload;
-    if (this.encryptionKey) {
+    if (shouldEncrypt && seed) {
       payload = await encryptPayload(
-        this.encryptionKey,
+        this.encryptionKey as CryptoKey,
         payload,
         chunkNonce(seed, frame.fileId).buffer as ArrayBuffer
       );
@@ -526,6 +535,7 @@ export class WebRTCManager {
 
   close(): void {
     this.clearReconnectDeadline();
+    this.pendingFileChunks.clear();
     for (const channel of [this.controlChannel, this.fileChannel]) {
       if (channel && channel.readyState !== "closed") {
         channel.close();
@@ -590,39 +600,87 @@ export class WebRTCManager {
   ): Promise<void> {
     if (label === CONTROL_CHANNEL_LABEL) {
       try {
-        let wire = await toText(data);
-        if (this.encryptionKey) {
-          const envelope = JSON.parse(wire) as unknown;
+        const wireText = await toText(data);
+        let isEnvelope = false;
+        let envelope: CipherEnvelope | null = null;
+        try {
+          const maybe = JSON.parse(wireText) as unknown;
           if (
-            envelope === null ||
-            typeof envelope !== "object" ||
-            (envelope as { v?: unknown }).v !== 1 ||
-            typeof (envelope as { nonce?: unknown }).nonce !== "string" ||
-            typeof (envelope as { ciphertext?: unknown }).ciphertext !==
-              "string"
+            maybe !== null &&
+            typeof maybe === "object" &&
+            (maybe as { v?: unknown }).v === 1 &&
+            typeof (maybe as { nonce?: unknown }).nonce === "string" &&
+            typeof (maybe as { ciphertext?: unknown }).ciphertext === "string"
           ) {
+            isEnvelope = true;
+            envelope = maybe as CipherEnvelope;
+          }
+        } catch {
+          isEnvelope = false;
+        }
+
+        let plainText: string;
+        if (isEnvelope) {
+          if (!this.encryptionKey) {
             throw new Error(
-              "Encrypted control message is not a valid cipher envelope"
+              "This room was created with a share link. Join using the full link, or have the sender share just the room code so both sides use the same mode."
             );
           }
-          wire = await decryptControlMessage(
+          plainText = await decryptControlMessage(
             this.encryptionKey,
             envelope as CipherEnvelope
           );
+        } else {
+          if (this.encryptionKey && !this.forcePlaintextFallback) {
+            this.forcePlaintextFallback = true;
+          }
+          plainText = wireText;
         }
-        const message = parseControlMessage(wire);
+
+        const message = parseControlMessage(plainText);
         if (message.kind === "file-start" && message.fileNonce) {
-          this.fileSeeds.set(message.fileId, seedFromBase64Url(message.fileNonce));
-          if (this.fileSeeds.size > MAX_TRACKED_FILE_IDS) {
-            const oldest = this.fileSeeds.keys().next().value;
-            if (oldest !== undefined) this.fileSeeds.delete(oldest);
+          try {
+            const seed = seedFromBase64Url(message.fileNonce);
+            this.fileSeeds.set(message.fileId, seed);
+            if (this.fileSeeds.size > MAX_TRACKED_FILE_IDS) {
+              const oldest = this.fileSeeds.keys().next().value;
+              if (oldest !== undefined) this.fileSeeds.delete(oldest);
+            }
+            const pending = this.pendingFileChunks.get(message.fileId);
+            if (pending) {
+              this.pendingFileChunks.delete(message.fileId);
+              for (const buffered of pending) {
+                const frame = await parseChunkFrame(
+                  buffered,
+                  this.encryptionKey && !this.forcePlaintextFallback
+                    ? this.encryptionKey
+                    : null,
+                  seed
+                );
+                this.options.onChunkReceived?.(frame);
+              }
+            }
+          } catch {
+            // invalid fileNonce is treated as plaintext file
           }
         } else if (message.kind === "file-end") {
           this.fileSeeds.delete(message.fileId);
+          this.pendingFileChunks.delete(message.fileId);
         }
         this.options.onControlMessage?.(message);
       } catch (error) {
-        this.reportError(error);
+        if (
+          error instanceof Error &&
+          error.message.includes("not a valid cipher envelope")
+        ) {
+          this.reportError(
+            new Error(
+              "The peers are using different encryption settings. Use the full share link on both sides, or the room code on both sides."
+            )
+          );
+        } else {
+          this.reportError(error);
+        }
       }
       return;
     }
@@ -635,12 +693,30 @@ export class WebRTCManager {
         FILE_CHUNK_HEADER_OFFSET,
         false
       );
-      const seed = this.fileSeeds.get(fileId);
-      if (!seed) {
-        throw new Error("Chunk arrived before the file was started");
+      const shouldDecrypt =
+        !!this.encryptionKey && !this.forcePlaintextFallback;
+      let seed = this.fileSeeds.get(fileId);
+      if (shouldDecrypt && !seed) {
+        const list = this.pendingFileChunks.get(fileId) ?? [];
+        list.push(buffer.slice(0));
+        this.pendingFileChunks.set(fileId, list);
+        if (list.length > 4096) {
+          this.pendingFileChunks.delete(fileId);
+          throw new Error(
+            "Too many chunks arrived before the file header"
+          );
+        }
+        return;
+      }
+      if (!shouldDecrypt) {
+        seed = new Uint8Array(8);
       }
       this.options.onChunkReceived?.(
-        await parseChunkFrame(buffer, this.encryptionKey, seed)
+        await parseChunkFrame(
+          buffer,
+          shouldDecrypt ? this.encryptionKey : null,
+          seed as Uint8Array
+        )
       );
     } catch (error) {
       this.reportError(error);
