@@ -148,7 +148,6 @@ export default function ShareDashboard({
     progress: number;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [clipboardState, setClipboardState] = useState<
     "idle" | "sent" | "error"
@@ -159,7 +158,6 @@ export default function ShareDashboard({
   const nextFileIdRef = useRef(0);
   const sentTimerRef = useRef<number | null>(null);
   const clipboardTimerRef = useRef<number | null>(null);
-  const toastTimerRef = useRef<number | null>(null);
   const disposedRef = useRef(false);
   const pendingTransfersRef = useRef<
     Map<
@@ -172,14 +170,6 @@ export default function ShareDashboard({
       }
     >
   >(new Map());
-
-  const showToast = useCallback((message: string) => {
-    setToast(message);
-    if (toastTimerRef.current !== null) {
-      window.clearTimeout(toastTimerRef.current);
-    }
-    toastTimerRef.current = window.setTimeout(() => setToast(null), 2000);
-  }, []);
 
   const sendTextMessage = async (
     category: TextMessage["category"]
@@ -216,14 +206,7 @@ export default function ShareDashboard({
     if (sentTimerRef.current !== null) {
       window.clearTimeout(sentTimerRef.current);
     }
-    sentTimerRef.current = window.setTimeout(() => setSent(false), 2000);
-    showToast(
-      category === "text"
-        ? "Text sent"
-        : category === "password"
-          ? "Password sent"
-          : "Code sent"
-    );
+    sentTimerRef.current = window.setTimeout(() => setSent(false), 1600);
     setError(null);
   };
 
@@ -271,13 +254,12 @@ export default function ShareDashboard({
       }
       setError(null);
       setClipboardState("sent");
-      showToast("Clipboard sent");
       if (clipboardTimerRef.current !== null) {
         window.clearTimeout(clipboardTimerRef.current);
       }
       clipboardTimerRef.current = window.setTimeout(
         () => setClipboardState("idle"),
-        2000
+        1600
       );
     } catch {
       setClipboardState("error");
@@ -371,7 +353,6 @@ export default function ShareDashboard({
       if (!finished) throw transferInterrupted();
       pendingTransfersRef.current.delete(fileId);
       setSending({ name: displayName, progress: 100 });
-      showToast("File sent");
     } catch (sendError) {
       if (disposedRef.current) return;
       if (
@@ -433,7 +414,6 @@ export default function ShareDashboard({
         pendingTransfersRef.current.delete(fileId);
         setPaused(false);
         setSending({ name: pending.name, progress: 100 });
-        showToast("File sent");
       } catch (resumeError) {
         if (disposedRef.current) return;
         if (
@@ -452,7 +432,7 @@ export default function ShareDashboard({
         pendingTransfersRef.current.delete(fileId);
       }
     },
-    [controller, waitForFileChannel, waitForBufferDrain, showToast]
+    [controller, waitForFileChannel, waitForBufferDrain]
   );
 
   useEffect(() => {
@@ -479,12 +459,9 @@ export default function ShareDashboard({
       if (clipboardTimerRef.current !== null) {
         window.clearTimeout(clipboardTimerRef.current);
       }
-      if (toastTimerRef.current !== null) {
-        window.clearTimeout(toastTimerRef.current);
-      }
       pendingTransfers.clear();
     };
-  }, [controller, resumeTransfer, showToast]);
+  }, [controller, resumeTransfer]);
 
   const sendFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -722,13 +699,6 @@ export default function ShareDashboard({
           </div>
         )}
       </div>
-      )}
-
-      {toast && (
-        <div className="flex w-full items-center gap-2 rounded-[4px] border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-200">
-          <Check className="h-4 w-4 shrink-0 text-zinc-300" />
-          {toast}
-        </div>
       )}
 
       {error && (
