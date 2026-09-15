@@ -150,6 +150,7 @@ export default function ShareDashboard({
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [clipboardState, setClipboardState] = useState<
     "idle" | "sent" | "error"
   >("idle");
@@ -631,7 +632,28 @@ export default function ShareDashboard({
         )}
 
         {tab === "files" && (
-          <div className="flex flex-col gap-3">
+          <div
+            className={cn(
+              "flex flex-col gap-3 rounded-[4px] border border-dashed p-3 transition-colors",
+              dragOver
+                ? "border-zinc-600 bg-zinc-900/50"
+                : "border-zinc-800 bg-transparent"
+            )}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const files = e.dataTransfer.files;
+              if (files && files.length > 0) void sendFiles(files);
+            }}
+          >
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
@@ -651,6 +673,9 @@ export default function ShareDashboard({
               >
                 Choose folder
               </Button>
+              <span className="flex items-center px-2 font-mono text-[11px] text-zinc-500">
+                or drag and drop any file
+              </span>
             </div>
             <input
               ref={fileInputRef}
@@ -719,7 +744,7 @@ export default function ShareDashboard({
       )}
 
       {toast && (
-        <div className="flex w-full items-center gap-2 rounded-[4px] border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-200">
+        <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-[4px] border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-200 shadow-lg">
           <Check className="h-4 w-4 shrink-0 text-zinc-300" />
           {toast}
         </div>

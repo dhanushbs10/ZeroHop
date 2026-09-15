@@ -83,6 +83,7 @@ function parseShareInput(input: string): {
   try {
     const url = new URL(trimmed);
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    const hostname = url.hostname.toLowerCase();
     const allowedHosts = new Set<string>();
     allowedHosts.add("droplink.app");
     allowedHosts.add("localhost");
@@ -90,7 +91,11 @@ function parseShareInput(input: string): {
       allowedHosts.add(window.location.host.toLowerCase());
       allowedHosts.add(window.location.hostname.toLowerCase());
     }
-    if (!allowedHosts.has(url.hostname.toLowerCase())) return null;
+    const isAllowed =
+      allowedHosts.has(hostname) ||
+      hostname.endsWith(".vercel.app") ||
+      hostname.endsWith(".droplink.app");
+    if (!isAllowed) return null;
     hash = url.hash;
   } catch {
     hash = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;

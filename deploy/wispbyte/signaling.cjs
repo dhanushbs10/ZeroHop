@@ -55261,7 +55261,9 @@ var TEXT_MAX_BYTES = 8 * 1024;
 // server/index.ts
 var PORT = Number(process.env.SIGNALING_PORT ?? 3001);
 var ROOM_TTL_MS = 30 * 60 * 1e3;
+var ROOM_GC_INTERVAL_MS = 60 * 1e3;
 var DEBUG_LOGS = process.env.SIGNALING_DEBUG === "1";
+var PEER_MESSAGE_LIMIT = 120;
 function debugLog(message, details) {
   if (DEBUG_LOGS) {
     console.log(message, details);
@@ -55271,7 +55273,7 @@ var ALLOWED_ORIGINS = (process.env.SIGNALING_ORIGINS ?? "").split(",").map((orig
 var RATE_LIMIT_WINDOW_MS = 60 * 1e3;
 var RATE_LIMIT_MAX_ROOMS = 30;
 var rateLimitHits = /* @__PURE__ */ new Map();
-function isRateLimited(key) {
+function isRateLimited(key, max = RATE_LIMIT_MAX_ROOMS) {
   const now = Date.now();
   const windowStart = now - RATE_LIMIT_WINDOW_MS;
   const hits = (rateLimitHits.get(key) ?? []).filter((at) => at > windowStart);
@@ -55283,9 +55285,31 @@ function isRateLimited(key) {
       if (latest <= windowStart) rateLimitHits.delete(storedKey);
     }
   }
-  return hits.length > RATE_LIMIT_MAX_ROOMS;
+  return hits.length > max;
 }
 var ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function clientAddress(socket) {
+  const forwarded = socket.handshake.headers["x-forwarded-for"];
+  if (typeof forwarded === "string") {
+    const first = forwarded.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return socket.handshake.address;
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+function safeRoomCode(value) {
+  return typeof value === "string" && ROOM_CODE_PATTERN.test(value) ? value : null;
+}
+function safePeerId(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 128 ? value : null;
+}
+function safeDisplayName(value) {
+  if (value === void 0 || value === null) return void 0;
+  if (typeof value !== "string" || value.length === 0) return void 0;
+  return value.slice(0, 64);
+}
 var rooms = /* @__PURE__ */ new Map();
 var registrations = /* @__PURE__ */ new Map();
 function emitError(socket, code, message) {
@@ -55327,8 +55351,16 @@ function toRoomInfo(room) {
 function relayToPeer(socket, roomCode, targetPeerId, event, makePayload) {
   const room = resolveRoom(socket, roomCode);
   if (!room) return;
+  if (!room.sockets.has(socket.id)) {
+    emitError(socket, "INVALID_MESSAGE", "This connection is not in that room.");
+    return;
+  }
+  if (room.peers.size < ROOM_CAPACITY) {
+    emitError(socket, "PEER_NOT_FOUND", "No peer to relay to yet.");
+    return;
+  }
   const target = room.sockets.get(targetPeerId);
-  if (!target) {
+  if (!target || targetPeerId === socket.id) {
     emitError(socket, "PEER_NOT_FOUND", "Target peer is not in this room.");
     return;
   }
@@ -55356,19 +55388,46 @@ function removePeer(socket, reason) {
     rooms.delete(roomCode);
   }
 }
+function sweepExpiredRooms() {
+  const now = Date.now();
+  for (const [roomCode, room] of rooms) {
+    if (now <= room.expiresAt) continue;
+    const roomLeft = {
+      roomCode,
+      reason: "timeout"
+    };
+    for (const socket of room.sockets.values()) {
+      socket.emit("room:left", roomLeft);
+      socket.disconnect(true);
+    }
+    rooms.delete(roomCode);
+  }
+}
 var app = (0, import_express.default)();
-app.use((0, import_cors.default)({ origin: ALLOWED_ORIGINS.length > 0 ? ALLOWED_ORIGINS : true }));
+app.set("trust proxy", true);
+app.use(
+  (0, import_cors.default)({
+    origin: ALLOWED_ORIGINS.length > 0 ? ALLOWED_ORIGINS : true
+  })
+);
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
+if (ALLOWED_ORIGINS.length === 0) {
+  console.warn(
+    "[droplink] SIGNALING_ORIGINS is not set; the server accepts any origin. Set it in production."
+  );
+}
 var server = import_node_http.default.createServer(app);
 var io2 = new Server(server, {
   cors: {
     origin: ALLOWED_ORIGINS.length > 0 ? ALLOWED_ORIGINS : true
   }
 });
+var roomGc = setInterval(sweepExpiredRooms, ROOM_GC_INTERVAL_MS);
+roomGc.unref();
 io2.on("connection", (socket) => {
-  const clientKey = socket.handshake.address;
+  const clientKey = clientAddress(socket);
   socket.on("room:create", (payload) => {
     debugLog("[server] room:create", { socket: socket.id });
     if (isRateLimited(`create:${clientKey}`)) {
@@ -55412,9 +55471,9 @@ io2.on("connection", (socket) => {
   });
   socket.on("room:join", (payload) => {
     debugLog("[server] room:join", {
-      roomCode: payload.roomCode,
+      roomCode: payload?.roomCode,
       socket: socket.id,
-      role: payload.role
+      role: payload?.role
     });
     if (isRateLimited(`join:${clientKey}`)) {
       emitError(socket, "RATE_LIMITED", "Too many join attempts. Wait a minute and retry.");
@@ -55424,11 +55483,20 @@ io2.on("connection", (socket) => {
       emitError(socket, "ALREADY_IN_ROOM", "This connection is already in a room.");
       return;
     }
-    if (typeof payload?.roomCode !== "string" || !ROOM_CODE_PATTERN.test(payload.roomCode)) {
+    if (payload?.clientProtocolVersion !== PROTOCOL_VERSION) {
+      emitError(
+        socket,
+        "PROTOCOL_VERSION_MISMATCH",
+        "Client protocol version is not supported."
+      );
+      return;
+    }
+    const roomCode = safeRoomCode(payload?.roomCode);
+    if (!roomCode) {
       emitError(socket, "INVALID_ROOM_CODE", "Room code is not valid.");
       return;
     }
-    const room = rooms.get(payload.roomCode);
+    const room = rooms.get(roomCode);
     if (!room) {
       emitError(socket, "ROOM_NOT_FOUND", "Room not found.");
       return;
@@ -55444,9 +55512,9 @@ io2.on("connection", (socket) => {
     }
     const peer = {
       peerId: socket.id,
-      role: payload.role ?? "receiver",
+      role: "receiver",
       presenceStatus: "online",
-      displayName: payload.displayName
+      displayName: safeDisplayName(payload?.displayName)
     };
     room.peers.set(socket.id, peer);
     room.sockets.set(socket.id, socket);
@@ -55474,48 +55542,85 @@ io2.on("connection", (socket) => {
   });
   socket.on("peer:offer", (payload) => {
     debugLog("[server] peer:offer", {
-      roomCode: payload.roomCode,
+      roomCode: payload?.roomCode,
       from: socket.id,
-      to: payload.targetPeerId,
-      type: payload.sessionDescription.type
+      to: payload?.targetPeerId,
+      type: payload?.sessionDescription?.type
     });
-    relayToPeer(socket, payload.roomCode, payload.targetPeerId, "peer:offer", (fromPeerId) => ({
+    if (isRateLimited(`peer:${clientKey}`, PEER_MESSAGE_LIMIT)) {
+      emitError(socket, "RATE_LIMITED", "Too many offer attempts. Wait a minute and retry.");
+      return;
+    }
+    const roomCode = safeRoomCode(payload?.roomCode);
+    const targetPeerId = safePeerId(payload?.targetPeerId);
+    if (!roomCode || !targetPeerId || !isRecord(payload?.sessionDescription)) {
+      emitError(socket, "INVALID_MESSAGE", "Offer payload is not valid.");
+      return;
+    }
+    relayToPeer(socket, roomCode, targetPeerId, "peer:offer", (fromPeerId) => ({
       fromPeerId,
       sessionDescription: payload.sessionDescription
     }));
   });
   socket.on("peer:answer", (payload) => {
     debugLog("[server] peer:answer", {
-      roomCode: payload.roomCode,
+      roomCode: payload?.roomCode,
       from: socket.id,
-      to: payload.targetPeerId,
-      type: payload.sessionDescription.type
+      to: payload?.targetPeerId,
+      type: payload?.sessionDescription?.type
     });
-    relayToPeer(socket, payload.roomCode, payload.targetPeerId, "peer:answer", (fromPeerId) => ({
+    if (isRateLimited(`peer:${clientKey}`, PEER_MESSAGE_LIMIT)) {
+      emitError(socket, "RATE_LIMITED", "Too many answer attempts. Wait a minute and retry.");
+      return;
+    }
+    const roomCode = safeRoomCode(payload?.roomCode);
+    const targetPeerId = safePeerId(payload?.targetPeerId);
+    if (!roomCode || !targetPeerId || !isRecord(payload?.sessionDescription)) {
+      emitError(socket, "INVALID_MESSAGE", "Answer payload is not valid.");
+      return;
+    }
+    relayToPeer(socket, roomCode, targetPeerId, "peer:answer", (fromPeerId) => ({
       fromPeerId,
       sessionDescription: payload.sessionDescription
     }));
   });
   socket.on("peer:ice-candidate", (payload) => {
     debugLog("[server] peer:ice-candidate", {
-      roomCode: payload.roomCode,
+      roomCode: payload?.roomCode,
       from: socket.id,
-      to: payload.targetPeerId
+      to: payload?.targetPeerId
     });
+    if (isRateLimited(`peer:${clientKey}`, PEER_MESSAGE_LIMIT)) {
+      emitError(socket, "RATE_LIMITED", "Too many ICE candidates. Wait a minute and retry.");
+      return;
+    }
+    const roomCode = safeRoomCode(payload?.roomCode);
+    const targetPeerId = safePeerId(payload?.targetPeerId);
+    if (!roomCode || !targetPeerId || !isRecord(payload?.candidate)) {
+      emitError(socket, "INVALID_MESSAGE", "ICE candidate payload is not valid.");
+      return;
+    }
     relayToPeer(
       socket,
-      payload.roomCode,
-      payload.targetPeerId,
+      roomCode,
+      targetPeerId,
       "peer:ice-candidate",
       (fromPeerId) => ({ fromPeerId, candidate: payload.candidate })
     );
   });
   socket.on("presence:update", (payload) => {
     debugLog("[server] presence:update", {
-      roomCode: payload.roomCode,
+      roomCode: payload?.roomCode,
       socket: socket.id,
-      status: payload.status
+      status: payload?.status
     });
+    if (isRateLimited(`presence:${clientKey}`, PEER_MESSAGE_LIMIT)) {
+      return;
+    }
+    if (payload?.status !== "online" && payload?.status !== "idle") {
+      emitError(socket, "INVALID_MESSAGE", "Presence status is not valid.");
+      return;
+    }
     const registration = registrations.get(socket.id);
     if (!registration) return;
     const room = resolveRoom(socket, registration.roomCode);
@@ -55539,7 +55644,7 @@ io2.on("connection", (socket) => {
   });
 });
 server.listen(PORT, () => {
-  console.log(`[zerohop] signaling server listening on http://localhost:${PORT}`);
+  console.log(`[droplink] signaling server listening on http://localhost:${PORT}`);
 });
 /*! Bundled license information:
 
