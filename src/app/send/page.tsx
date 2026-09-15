@@ -94,33 +94,11 @@ function RoomPanel({
             {roomCode}
           </span>
         </div>
-        <Button
-          size="sm"
-          onClick={onCopyRoomCode}
-          className="gap-2 rounded-[4px]"
-        >
-          {copiedCode ? (
-            <Check className="h-4 w-4" />
-          ) : (
-            <Copy className="h-4 w-4" />
-          )}
-          {copiedCode ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      <div className="flex min-w-0 flex-col gap-2">
-        <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-zinc-500">
-          Share link
-        </span>
-        <div className="flex items-center gap-2 rounded-[4px] border border-zinc-800 bg-zinc-950 py-1.5 pl-3 pr-1.5">
-          <input
-            readOnly
-            value={shareLink ?? ""}
-            className="min-w-0 flex-1 bg-transparent font-mono text-xs text-zinc-400 outline-none"
-          />
+        <div className="flex shrink-0 items-center gap-2">
           {shareLink && (
             <div
               title="Scan to join"
-              className="hidden shrink-0 rounded-[3px] border border-zinc-800 bg-zinc-950 p-1 sm:flex"
+              className="flex shrink-0 rounded-[3px] border border-zinc-800 bg-zinc-950 p-1"
             >
               <QRCodeSVG
                 value={shareLink}
@@ -132,6 +110,30 @@ function RoomPanel({
               />
             </div>
           )}
+          <Button
+            size="sm"
+            onClick={onCopyRoomCode}
+            className="gap-2 rounded-[4px]"
+          >
+            {copiedCode ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              <Copy className="h-4 w-4" />
+            )}
+            {copiedCode ? "Copied" : "Copy"}
+          </Button>
+        </div>
+      </div>
+      <div className="flex min-w-0 flex-col gap-2">
+        <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+          Share link
+        </span>
+        <div className="flex items-center gap-2 rounded-[4px] border border-zinc-800 bg-zinc-950 py-1.5 pl-3 pr-1.5">
+          <input
+            readOnly
+            value={shareLink ?? ""}
+            className="min-w-0 flex-1 bg-transparent font-mono text-xs text-zinc-400 outline-none"
+          />
           <Button
             size="sm"
             variant="outline"
@@ -146,20 +148,6 @@ function RoomPanel({
             {copied ? "Copied" : "Copy Link"}
           </Button>
         </div>
-        {shareLink && (
-          <div className="flex justify-start sm:hidden">
-            <div className="rounded-[4px] border border-zinc-800 bg-zinc-950 p-3">
-              <QRCodeSVG
-                value={shareLink}
-                size={128}
-                level="M"
-                bgColor="#09090b"
-                fgColor="#f4f4f5"
-                marginSize={1}
-              />
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
