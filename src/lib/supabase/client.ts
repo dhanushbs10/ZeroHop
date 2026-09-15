@@ -3,21 +3,20 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 let supabaseClient: SupabaseClient | null = null;
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
+export function createClient(): SupabaseClient {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!url) {
     throw new Error(
-      `${name} is not set. Add it to .env.local before using account features.`
+      "NEXT_PUBLIC_SUPABASE_URL is not set. Add it to .env.local before using account features."
     );
   }
-  return value;
-}
-
-export function createClient(): SupabaseClient {
-  return createBrowserClient(
-    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-  );
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!anonKey) {
+    throw new Error(
+      "NEXT_PUBLIC_SUPABASE_ANON_KEY is not set. Add it to .env.local before using account features."
+    );
+  }
+  return createBrowserClient(url, anonKey);
 }
 
 export function getSupabase(): SupabaseClient {
