@@ -10,6 +10,9 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  if (typeof window !== "undefined") {
+    console.error(error);
+  }
   return (
     <html lang="en" className="dark">
       <body className="flex min-h-screen flex-col bg-background text-foreground antialiased">
@@ -18,7 +21,7 @@ export default function GlobalError({
             <Zap className="h-4 w-4 text-zinc-300" />
           </span>
           <p className="mt-8 font-mono text-[11px] uppercase tracking-[0.25em] text-zinc-500">
-            Something broke : {error.digest ?? "unexpected error"}
+            Something broke : {error.digest ?? error.message ?? "unexpected error"}
           </p>
           <h1 className="mt-4 max-w-md text-3xl font-semibold tracking-tight text-zinc-100 sm:text-4xl">
             This hop did not land
